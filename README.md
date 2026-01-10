@@ -8,53 +8,36 @@ A large fraction of day-to-day work in experimental HEP is not novel theory or a
 
 This benchmark evaluates whether an autonomous agent can reliably perform such tasks end-to-end under realistic constraints, rather than solving isolated coding puzzles. 
 
-## Run
-``` python
-uv run python main.py green  
-uv run python main.py launch   
-```
+---
 
-## What Is Being Evaluated
+## High-level architecture
 
-The benchmark evaluates an agent along three dimensions:
+### Roles
 
-1. **Correctness**
-   - Numerical agreement with reference results (fit parameters, test statistics)
-   - Successful generation of required artifacts (plots, tables, reports)
+- **Green agent (this repo)**  
+  Orchestrates tasks, optionally downloads data, collects submissions (mock or from white agent), evaluates them, and reports artifacts.
 
-2. **Operational Robustness**
-   - Ability to execute multi-step analysis workflows
-   - Graceful handling of minor execution issues (e.g. reruns, missing files)
+- **White agent (future / external)**  
+  Performs the actual physics analysis and returns a **structured submission trace** (cuts, cutflow, fit metadata, artifacts, etc.).
 
-3. **Efficiency and Quality**
-   - Number of steps/tool calls
-   - Code clarity and logging
-   - Reproducibility of results
+---
 
-## Task Overview
+## Data flow
 
-The current MVP task is a simplified ATLAS Open Data analysis workflow:
+1. AgentBeats sends an `EvalRequest` JSON to `POST /...` (A2A message endpoint).
+2. `src/agent.py` parses the request and loads `GreenConfig`.
+3. For each task:
+   - Optional: download/cached data via `atlasopenmagic` (`utils/atlas_download.py`)
+   - Produce a `submission_trace`:
+     - `mock` mode: `utils/mock_traces.py`
+     - `call_white` mode: (TODO) call white agent via `Messenger`
+   - Run evaluation using `engine/`:
+     - load spec package (`workflow.yaml`, `rubric.yaml`, `judge_prompt.md`)
+     - rule-based evaluation (v0)
+     - aggregate into a final score report
+4. Green agent reports progress + artifacts via `TaskUpdater`.
 
-- Input: a small ATLAS Open Data ROOT / derived dataset
-- Goal:
-  1. Load the dataset
-  2. Perform a predefined statistical fit
-  3. Compute test statistics (e.g. best-fit value, uncertainty, p-value)
-  4. Generate a standard analysis plot
-- Output:
-  - `fit_results.json`
-  - `fit_plot.png`
-
-## Dataset
-
-This benchmark uses publicly available datasets from **[ATLAS Open Data](https://opendata.cern.ch)**.
-
-To ensure fast evaluation and reproducibility, we:
-- use a small, preselected subset of the data
-- provide derived inputs where appropriate
-- avoid detector-specific private calibrations
-
-The goal is not physics discovery, but realistic analysis workflows.
+---
 
 ## AgentBeats Phase
 

@@ -1,0 +1,21 @@
+version: 1
+task_type: "zpeak_fit"
+name: "Z peak by fitting (Z→μμ)"
+description: >
+  Build m_mumu spectrum and fit around the Z resonance.
+  Score both fit results and completeness of the fit method description.
+
+fit_expectations:
+  mu_target: 91.1876
+  mu_tolerance: 2.0
+  sigma_range: [1.0, 6.0]
+  min_p_value: 0.01
+
+  # We do NOT enforce the exact model, but require metadata so we can judge method quality.
+  method_required_fields:
+    - model
+    - fit_range
+    - binned_or_unbinned
+    - optimizer
+    - initial_params
+    - uncertainties_method

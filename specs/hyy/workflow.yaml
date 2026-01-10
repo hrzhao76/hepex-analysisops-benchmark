@@ -1,0 +1,99 @@
+version: 1
+task_type: "hyy_analysis"
+name: "HyyAnalysis baseline (reference-guided)"
+description: >
+  A reference-guided H -> gamma gamma style selection workflow.
+  This is NOT the only correct implementation, but the cut intent and ordering
+  should be comparable.
+
+inputs:
+  tree_library: "uproot + awkward"
+  required_branches:
+    - photon_isTightID
+    - photon_pt
+    - photon_ptcone20
+    - photon_eta
+    - photon_phi
+    - photon_e
+
+objects:
+  photons:
+    count: 2
+    ordering: "pt-desc"   # assume leading/subleading in arrays
+
+derived_variables:
+  m_yy:
+    method: "vector.zip(p4) then (p4[:,0]+p4[:,1]).M"
+    p4_fields: [pt, eta, phi, e]
+    units: "GeV"
+  calo_iso_frac:
+    definition: "photon_ptcone20 / photon_pt"
+  pt_over_myy:
+    definition: "photon_pt / m_yy"
+
+selection:
+  cut_order_enforced: true
+  cuts:
+    - id: "tight_id"
+      title: "Photon reconstruction quality"
+      intent: "Both photons must be well reconstructed (Tight ID)."
+      reference_expression: "(photon_isTightID[:,0] == True) & (photon_isTightID[:,1] == True)"
+      required_branches: [photon_isTightID]
+
+    - id: "pt_abs"
+      title: "Absolute photon pT thresholds"
+      intent: "Leading photon pT > 50 GeV and subleading photon pT > 30 GeV."
+      reference_expression: "(photon_pt[:,0] > 50) & (photon_pt[:,1] > 30)"
+      required_branches: [photon_pt]
+
+    - id: "calo_iso"
+      title: "Calorimeter isolation"
+      intent: "Each photon calorimeter isolation fraction < 5.5%."
+      reference_expression: "(photon_ptcone20[:,0]/photon_pt[:,0] < 0.055) & (photon_ptcone20[:,1]/photon_pt[:,1] < 0.055)"
+      required_branches: [photon_ptcone20, photon_pt]
+
+    - id: "eta_crack_veto"
+      title: "Eta crack region veto"
+      intent: "Veto photons in barrel/end-cap transition region |eta| in [1.37, 1.52]."
+      reference_expression: >
+        condition_0 = (abs(photon_eta[:,0]) < 1.37) | (abs(photon_eta[:,0]) > 1.52)
+        condition_1 = (abs(photon_eta[:,1]) < 1.37) | (abs(photon_eta[:,1]) > 1.52)
+        condition_0 & condition_1
+      required_branches: [photon_eta]
+      notes: >
+        Equivalent logical forms are acceptable. The intent is to EXCLUDE the crack region.
+
+    - id: "compute_myy"
+      title: "Compute diphoton invariant mass"
+      intent: "Compute m_yy from (pt,eta,phi,e) using vector library."
+      reference_expression: "(vector.zip({...})[:,0] + vector.zip({...})[:,1]).M"
+      required_branches: [photon_pt, photon_eta, photon_phi, photon_e]
+      produces: [m_yy]
+
+    - id: "pt_rel_myy"
+      title: "Relative pT to m_yy"
+      intent: "Each photon pt / m_yy > 0.35."
+      reference_expression: "(photon_pt[:,0]/m_yy > 0.35) & (photon_pt[:,1]/m_yy > 0.35)"
+      required_branches: [photon_pt]
+      depends_on: [m_yy]
+
+outputs:
+  required_artifacts:
+    - id: "submission_trace"
+      kind: "json"
+      description: "Structured trace of steps, cuts, expressions, and cutflow."
+    - id: "cutflow"
+      kind: "table"
+      description: "A cutflow table matching the cut IDs and order."
+      required_columns: ["cut_id", "n_before", "n_after"]
+
+  optional_artifacts:
+    - id: "hist_myy"
+      kind: "histogram"
+      description: "Histogram of m_yy after final selection."
+      recommended:
+        bins: 55
+        range: [105, 160]
+    - id: "fit_result"
+      kind: "json"
+      description: "Optional fit results (signal+background) on m_yy."

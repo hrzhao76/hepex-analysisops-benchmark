@@ -1,0 +1,8 @@
+version: 1
+total: 100
+
+hard_checks:
+  - id: "trace_present"
+    description: "submission_trace must include fit_result and fit_method."
+    required_fields: ["status", "fit_result", "fit_method"]
+    fail_total_score: 0

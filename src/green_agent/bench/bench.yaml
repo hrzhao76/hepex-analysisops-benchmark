@@ -1,6 +1,0 @@
-benchmark: hepex
-tasks:
-  - id: 1
-    path: zll/task1_run/task.yaml
-  - id: 2
-    path: zll/task2_patch/task.yaml

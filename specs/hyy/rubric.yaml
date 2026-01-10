@@ -1,0 +1,71 @@
+version: 1
+total: 100
+
+hard_checks:
+  - id: "trace_present"
+    description: "submission_trace must be provided with steps/cuts/cutflow."
+    required_fields:
+      - status
+      - cuts
+      - cutflow
+    fail_total_score: 0
+
+  - id: "cutflow_has_all_required_cuts"
+    description: "Cutflow must contain all required cut IDs (in any equivalent naming only if explicitly mapped)."
+    required_cut_ids:
+      - tight_id
+      - pt_abs
+      - calo_iso
+      - eta_crack_veto
+      - compute_myy
+      - pt_rel_myy
+    fail_penalty: 40  # missing required cuts is severe
+
+dimensions:
+  - id: "cut_order_and_coverage"
+    weight: 25
+    description: >
+      Cut list includes all required cuts and preserves the expected logical ordering:
+      tight_id -> pt_abs -> calo_iso -> eta_crack_veto -> compute_myy -> pt_rel_myy.
+    scoring_guidance:
+      full: "All required cuts present and order matches spec."
+      partial: "Minor reorder that does not change dependencies; or explicit mapping is provided."
+      low: "Missing cuts or major reordering that breaks intent."
+
+  - id: "cut_intent_match"
+    weight: 35
+    description: >
+      Each cut's intent matches the workflow reference. Equivalent boolean logic is acceptable.
+      Thresholds should match: pT>50/30, calo_iso_frac<0.055, crack veto [1.37,1.52], pt/m_yy>0.35.
+    scoring_guidance:
+      full: "Expressions/thresholds match or are clearly equivalent with correct units."
+      partial: "One threshold slightly off OR unclear equivalence but likely same intent."
+      low: "Multiple thresholds wrong or intent differs."
+
+  - id: "cutflow_consistency"
+    weight: 20
+    description: >
+      Cutflow counts should be monotonic decreasing (n_after <= n_before) and match the cut order.
+      Reported numbers should be plausible and internally consistent.
+    scoring_guidance:
+      full: "Monotonic and aligned with cuts; counts exist for each cut."
+      partial: "Minor formatting issues; counts missing for one cut but rest consistent."
+      low: "Non-monotonic without explanation; missing most counts."
+
+  - id: "analysis_trace_quality"
+    weight: 10
+    description: >
+      Submission includes clear, structured trace: branches used, derived variables, and artifact list.
+    scoring_guidance:
+      full: "Has branches, derived vars, artifacts, and short explanations."
+      partial: "Some missing metadata but still understandable."
+      low: "Hard to follow; missing key info."
+
+  - id: "communication_and_reasoning"
+    weight: 10
+    description: >
+      Explains why each cut is applied and any deviations from reference.
+    scoring_guidance:
+      full: "Concise rationale for each cut, mentions equivalences/edge cases."
+      partial: "Some rationale but incomplete."
+      low: "No reasoning."
