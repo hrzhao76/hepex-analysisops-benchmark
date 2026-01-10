@@ -1,0 +1,36 @@
+task:
+  id: p_to_z
+  name: "P-value to Z-score"
+  description: >
+    Given p-values, compute the corresponding Z-scores
+    under one-sided Gaussian convention.
+
+input:
+  parameters:
+    p_values:
+      type: list[float]
+      required: true
+
+rubric:
+  metric: accuracy
+  tolerance: 1e-4
+  matching: by_position
+  ground_truth:
+    - p: 0.05
+      z: 1.644853626951
+    - p: 0.01
+      z: 2.326347874041
+    - p: 2.87e-7
+      z: 5.0
+
+white_agent:
+  output_key: z_scores
+  prompt_template: |
+    You are given a list of p-values.
+    Compute the corresponding one-sided Gaussian-equivalent Z-scores
+    assuming a standard normal distribution.
+
+    p_values: {{ p_values }}
+
+    Return the result as JSON only:
+    {"z_scores": [float, ...]}

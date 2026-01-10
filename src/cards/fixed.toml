@@ -1,0 +1,24 @@
+name = "hepex_fixed_harness_agent"
+description = "HEP-Ex AnalysisOps v0 fixed harness evaluator (ground-truth + tolerance scoring)."
+version = "0.1.0"
+
+default_input_modes = ["text"]
+default_output_modes = ["text"]
+
+[capabilities]
+streaming = false
+
+[[skills]]
+id = "fixed_harness_eval"
+name = "Fixed Harness Evaluation"
+description = """
+Runs a fixed-harness test specified by config.test_file (YAML under tasks/),
+calls the white agent, and scores deterministically using rubric.ground_truth.
+"""
+tags = ["hepex", "analysisops", "benchmark", "fixed-harness"]
+examples = ["""
+{
+  "participants": {"white_agent": "http://localhost:9002/"},
+  "config": {"test_file": "simple_fitting/1-p_to_z.yaml"}
+}
+"""]
