@@ -1,0 +1,14 @@
+id: "hyy_analysis"
+type: "hyy_analysis"
+mode: "mock" 
+needs_data: true
+release: "2025e-13tev-beta"
+dataset: "data"
+skim: "GamGam"
+rubric_path: "rubric.yaml"
+judge_prompt_path: "judge_prompt.md"
+white_prompt_path: "white_prompt.md"
+eval_ref_path: "eval_ref.yaml"
+description: "Perform a Higgs to diphoton (H->yy) analysis on ATLAS Open Data."
+constraints:
+  max_files: 5

@@ -1,0 +1,19 @@
+# Evaluation Reference for H->yy
+version: 1
+
+expected_results:
+  mass:
+    center: 125.4
+    sigma: 2.3
+    tolerance: 1.0 # GeV
+  
+  cutflow:
+    tight_id: { min_eff: 0.8 }
+    
+  cuts:
+    - tight_id
+    - pt_abs
+    - calo_iso
+    - eta_crack_veto
+    - compute_myy
+    - pt_rel_myy

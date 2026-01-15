@@ -4,7 +4,6 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Optional
-from tasks.task_spec import TaskSpec
 import atlasopenmagic as atom
 
 
@@ -18,20 +17,6 @@ class DownloadResult:
     local_size: int
     error: Optional[str] = None
 
-
-# ----------------------------- # Helper: atlasopenmagic download # ----------------------------- 
-def _get_local_paths_from_atlasopenmagic_urls(urls: list[str]) -> list[str]: 
-    """ atlasopenmagic get_urls sometimes returns strings like: 
-    "https::/path/to/local/file.root" (based on your earlier snippet using split('::')[1]) 
-    This helper extracts the local path part robustly. """ 
-    local_paths: list[str] = [] 
-    for u in urls: 
-        if "::" in u: 
-            local_paths.append(u.split("::", 1)[1]) 
-        else: 
-            # Fallback: keep as-is (could already be local) 
-            local_paths.append(u) 
-    return local_paths
 
 # -----------------------------
 # Low-level HTTP helpers (urllib)
@@ -245,45 +230,3 @@ def ensure_atlas_open_data_downloaded(
         "results": [r.__dict__ for r in results],  # JSON-friendly
         "raw_urls": urls,
     }
-
-def ensure_data_cahce_downloaded(task: TaskSpec) -> dict[str, Any]:
-    """
-    Download (cache) files using atlasopenmagic, return metadata for later steps.
-    """
-    import atlasopenmagic as atom  # installed per user
-
-    atom.set_release(task.release)
-
-    # cache=True makes files copied locally rather than streamed.
-    urls = atom.get_urls(task.dataset, task.skim, protocol=task.protocol, cache=task.cache)
-
-    urls_sorted = sorted(urls)
-    if task.max_files and task.max_files > 0:
-        urls_sorted = urls_sorted[: task.max_files]
-
-    local_paths = _get_local_paths_from_atlasopenmagic_urls(urls_sorted)
-
-    return {
-        "release": task.release,
-        "dataset": task.dataset,
-        "skim": task.skim,
-        "protocol": task.protocol,
-        "cache": task.cache,
-        "n_files": len(local_paths),
-        "local_paths": local_paths,
-        # keep raw urls too in case you want to debug
-        "raw_urls": urls_sorted,
-    }
-
-
-def download_atlas_open_data(task: TaskSpec) -> dict[str, Any]:
-    return ensure_atlas_open_data_downloaded(
-        skim=task.skim,
-        release=task.release,
-        dataset=task.dataset,
-        protocol=task.protocol,
-        output_dir=getattr(task, "output_dir", "./atlas_data"),
-        max_files=task.max_files or 0,
-        workers=getattr(task, "workers", 6),
-        verbose=True,
-    )

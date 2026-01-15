@@ -1,0 +1,23 @@
+id: t004_hzz
+type: hzz
+mode: call_white
+
+needs_data: true
+release: 2025e-13tev-beta
+dataset: data
+skim: exactly4lep
+protocol: https
+max_files: 3
+cache: true
+reuse_existing: true
+
+rubric_path: rubric.yaml
+eval_ref_path: eval_ref.yaml
+white_prompt_path: white_prompt.md
+judge_prompt_path: judge_prompt.md
+
+description: "Rediscover Higgs in the 4-lepton channel (H->ZZ*->4l)."
+constraints:
+  time_limit_sec: 600
+  memory_gb: 8
+  allow_network: false

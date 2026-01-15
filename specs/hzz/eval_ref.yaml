@@ -1,0 +1,7 @@
+version: 1
+fit_expectations:
+  center_target: 125.0
+  center_tolerance: 3.0 # Excellent resolution
+  method_required_fields:
+    - model
+    - reasoning

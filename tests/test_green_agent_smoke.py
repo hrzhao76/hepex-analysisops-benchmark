@@ -60,29 +60,42 @@ async def test_green_agent_smoke(tmp_path, monkeypatch):
     data_dir = tmp_path / "atlas_cache"
     data_dir.mkdir(parents=True, exist_ok=True)
 
+    # Mock data download to avoid network/large files
+    import agent as agent_module
+    def _fake_download(**kwargs): # handle all args
+         return {
+            "n_files": 1,
+            "local_paths": ["/tmp/fake.root"],
+            "dataset": kwargs.get("dataset", "data"),
+            "skim": kwargs.get("skim", "skim"),
+         }
+    monkeypatch.setattr(agent_module, "ensure_atlas_open_data_downloaded", _fake_download)
+
+    # Create mock task in tmp_path
+    spec_dir = tmp_path / "specs" / "zpeak_fit"
+    spec_dir.mkdir(parents=True, exist_ok=True)
+    
+    import yaml
+    (spec_dir / "task_spec.yaml").write_text(yaml.dump({
+        "id": "t001_zpeak_fit",
+        "type": "zpeak_fit",
+        "mode": "mock",
+        "needs_data": True,
+        "skim": "2muons",
+        "rubric_path": "rubric.yaml"
+    }))
+    (spec_dir / "rubric.yaml").write_text(yaml.dump({
+        "total": 100,
+        "gates": [{"id":"g1", "type":"required_fields", "required_fields":["status"]}],
+        "rule_checks": []
+    }))
+
     # Build a minimal platform request
     req = {
         "participants": {},  # no white_agent needed in mock mode
         "config": {
             "data_dir": str(data_dir),
-            "tasks": [
-                {
-                    "id": "t001_zpeak_fit",
-                    "type": "zpeak_fit",
-                    "mode": "mock",
-                    "needs_data": True,   # IMPORTANT: avoid network download for this smoke test
-                    "release": "2025e-13tev-beta",
-                    "dataset": "data",
-                    "skim": "2muons",
-                    "protocol": "https",
-                    "max_files": 1,
-                    "cache": True,
-                    "reuse_existing": True,
-                    "workflow_spec_path": "specs/zpeak_fit/workflow.yaml",
-                    "rubric_path": "specs/zpeak_fit/rubric.yaml",
-                    "judge_prompt_path": "specs/zpeak_fit/judge_prompt.md",
-                }
-            ],
+            "task_dirs": [str(spec_dir)],
         },
     }
 

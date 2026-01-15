@@ -168,10 +168,37 @@ def required_keys_in_dict(cfg, trace, rubric, wf) -> CheckResult:
                        {cfg.get("signal_key","missing_keys"): missing})
 
 
+
+def check_cut_ids(cfg, trace, rubric, wf) -> CheckResult:
+    pts = float(cfg.get("points", 0.0))
+    req_ids = cfg.get("required_cut_ids", [])
+    cuts = trace.get("cuts", [])
+    
+    if not isinstance(cuts, list):
+         return CheckResult(False, 0.0, pts, [{"severity":"error","code":"INVALID_CUTS", "message":"trace['cuts'] must be a list"}], {})
+
+    found_ids = {c.get("cut_id") for c in cuts if isinstance(c, dict)}
+    missing = [rid for rid in req_ids if rid not in found_ids]
+    
+    gate = bool(cfg.get("gate", False))
+    
+    if missing:
+        return CheckResult(
+            passed=(False if gate else True),
+            points=0.0,
+            max_points=pts,
+            issues=[{"severity":"error","code":"MISSING_CUT_IDS", "message":f"Missing cut IDs: {missing}"}],
+            signals={"missing_cut_ids": missing}
+        )
+    
+    return CheckResult(True, pts, pts, [], {"missing_cut_ids": []})
+
+
 REGISTRY: Dict[str, CheckFn] = {
     "required_fields": required_fields,
     "numeric_in_range": numeric_in_range,
     "threshold_ge": threshold_ge,
     "target_soft": target_soft,
     "required_keys_in_dict": required_keys_in_dict,
+    "check_cut_ids": check_cut_ids,
 }

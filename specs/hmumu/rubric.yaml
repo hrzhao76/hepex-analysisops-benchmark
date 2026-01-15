@@ -1,0 +1,42 @@
+version: 1
+total: 100
+
+gates:
+  - id: trace_present
+    type: required_fields
+    required_fields: ["status", "cuts", "fit_result", "fit_method"]
+    fail_total_score: 0
+
+rule_checks:
+  - id: check_cuts
+    type: check_cut_ids
+    points: 30
+    required_cut_ids:
+      - "trig"
+      - "2lep"
+      - "pt_30"
+      - "met_80"
+      - "jet_vbf"
+      - "bjet_veto"
+
+  - id: check_mass
+    type: numeric_in_range
+    points: 20
+    value_path: "fit_result.center"
+    lo: 120.0
+    hi: 130.0
+
+  - id: check_method_metadata
+    type: required_keys_in_dict
+    points: 10
+    dict_path: "fit_method"
+    required_keys_path: "fit_expectations.method_required_fields"
+    missing_penalty_per_key: 5
+
+llm_checks:
+  - id: method_reasoning
+    type: llm_reasoning
+    points: 40
+    output_key: "dimension_scores.method_reasoning"
+    clamp: [0, 40]
+    confidence_key: "confidence"

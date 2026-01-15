@@ -15,14 +15,12 @@ from tasks.task_spec import GreenConfig, TaskSpec, load_task_spec
 
 from utils import _utc_now_iso, _new_run_id, _safe_write_json, _safe_write_text
 from utils.atlas_download import ensure_atlas_open_data_downloaded  
-# from engine.runner import run_engine_for_task
 from engine.package_loader import load_spec_bundle
 from engine.prompt_render import _builtin_minimal_prompt
-from engine.package_loader import load_spec_bundle
 from engine.evaluator import evaluate_task
 from engine.llm_judge_gemini import GeminiJudge
 
-from utils.mock_traces import mock_trace_zpeak_fit, mock_trace_hyy
+from utils.mock_traces import get_mock_trace
 from dotenv import load_dotenv, find_dotenv
 from pathlib import Path
 
@@ -39,6 +37,11 @@ class Agent:
     def __init__(self):
         load_dotenv(find_dotenv())
         self.messenger = Messenger()
+        try:
+            self.gemini_judge = GeminiJudge()
+        except RuntimeError:
+            # OK if key missing, assuming run() won't need it or will fail gracefully
+            self.gemini_judge = None
 
     def validate_request(self, request: EvalRequest) -> tuple[bool, str]:
         missing_roles = set(self.required_roles) - set(request.participants.keys())
@@ -81,11 +84,7 @@ class Agent:
         mode = getattr(task, "mode", "mock")
 
         if mode == "mock":
-            if task.type == "zpeak_fit":
-                return mock_trace_zpeak_fit(task.id)
-            if task.type == "hyy_analysis":
-                return mock_trace_hyy(task.id)
-            return {"task_id": task.id, "status": "error", "error": f"Unknown task type: {task.type}"}
+            return get_mock_trace(task.type, task.id)
 
         # Future: call white agent
         # return {"task_id": task.id, "status": "error", "error": "call_white not implemented yet"}
@@ -185,7 +184,7 @@ class Agent:
             "data_dir": os.path.abspath(base_data_dir),
             "tasks": [],
             "score_total": 0.0,                 # sum of normalized per task
-            "score_max": float(len(cfg.tasks)), # maximum normalized sum
+            "score_max": float(len(cfg.task_dirs)), # maximum normalized sum
         }
 
         # 3) Run tasks sequentially
@@ -211,7 +210,7 @@ class Agent:
 
             await updater.update_status(
                 TaskState.working,
-                new_agent_text_message(f"Task {idx}/{len(cfg.tasks)}: {task.type} ({task.id})"),
+                new_agent_text_message(f"Task {idx}/{len(cfg.task_dirs)}: {task.type} ({task.id})"),
             )
 
             # 3a) Ensure data (optional)
@@ -290,11 +289,6 @@ class Agent:
 
             # 3c) Evaluate
             try:
-                # report = run_engine_for_task(
-                #     task_spec=task,
-                #     data_info=data_info,
-                #     submission_trace=submission_trace,
-                # )
 
                 bundle = load_spec_bundle(task)  # {"rubric":..., "eval_ref":..., "judge_prompt":..., "white_prompt":...}
                 spec = {

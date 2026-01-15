@@ -1,0 +1,7 @@
+version: 1
+fit_expectations:
+  center_target: 125.0
+  center_tolerance: 10.0 # b-jet energy resolution is worse than muons
+  method_required_fields:
+    - model
+    - reasoning

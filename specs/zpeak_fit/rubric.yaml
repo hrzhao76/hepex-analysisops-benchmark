@@ -7,7 +7,7 @@ gates:
     required_fields: ["status", "fit_result", "fit_method"]
     fail_total_score: 0
 
-  # sanity gate：避免乱填 mu
+  # sanity gate: prevent random mu values
   - id: mu_sanity
     type: numeric_in_range
     value_path: "fit_result.mu"

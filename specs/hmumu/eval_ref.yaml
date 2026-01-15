@@ -1,0 +1,9 @@
+version: 1
+fit_expectations:
+  center_target: 125.0
+  center_tolerance: 5.0
+  method_required_fields:
+    - model
+    - optimizer
+    - fit_range
+    - reasoning

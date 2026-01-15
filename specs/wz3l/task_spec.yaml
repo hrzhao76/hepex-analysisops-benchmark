@@ -1,0 +1,23 @@
+id: t006_wz3l
+type: wz3l
+mode: call_white
+
+needs_data: true
+release: 2025e-13tev-beta
+dataset: data
+skim: exactly3lep
+protocol: https
+max_files: 3
+cache: true
+reuse_existing: true
+
+rubric_path: rubric.yaml
+eval_ref_path: eval_ref.yaml
+white_prompt_path: white_prompt.md
+judge_prompt_path: judge_prompt.md
+
+description: "Explore WZ diboson production in the 3-lepton channel."
+constraints:
+  time_limit_sec: 600
+  memory_gb: 8
+  allow_network: false
