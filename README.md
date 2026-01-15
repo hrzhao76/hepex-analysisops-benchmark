@@ -9,7 +9,7 @@ This benchmark evaluates an autonomous agent's ability to perform end-to-end phy
 2.  **Higgs to Diphoton Analysis (`hyy`)**: Measure Higgs mass using high-resolution diphoton events.
 3.  **H->mumu (VBF) (`hmumu`)**: Search for the rare Higgs decay to muons using VBF topology selection.
 4.  **H->bb (0-lepton) (`hbb`)**: Identify Higgs to b-quark pairs in the high-MET VH channel.
-5.  **H->ZZ*->4l (`hzz`)**: Rediscover the "Golden Channel" Higgs decay to four leptons.
+5.  **H->ZZ->4l (`hzz`)**: Rediscover the "Golden Channel" Higgs decay to four leptons.
 6.  **Top Pair Production (`ttbar`)**: Reconstruct the top quark mass in the semileptonic decay channel.
 7.  **WZ Diboson (`wz3l`)**: Analyze WZ production in the 3-lepton final state.
 
