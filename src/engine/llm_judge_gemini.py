@@ -24,14 +24,14 @@ class GeminiJudge:
     Minimal Gemini judge.
     Env:
       - GEMINI_API_KEY  (Gemini Developer API)
-      - HEPEX_GEMINI_MODEL (optional) e.g. "gemini-2.0-flash"
+      - HEPEX_GEMINI_MODEL (optional) e.g. "gemini-2.5-flash"
     """
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
-        api_key = api_key or os.getenv("GEMINI_API_KEY")
+        api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
-            raise RuntimeError("Missing GEMINI_API_KEY")
+            raise RuntimeError("Missing GEMINI_API_KEY or GOOGLE_API_KEY")
         self.client = genai.Client(api_key=api_key)
-        self.model = model or os.getenv("HEPEX_GEMINI_MODEL", "gemini-2.0-flash")
+        self.model = model or os.getenv("HEPEX_GEMINI_MODEL", "gemini-2.5-flash")
 
     def _generate_with_retry(self, prompt: str, config: types.GenerateContentConfig, retries: int = 5) -> str:
         import time
