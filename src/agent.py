@@ -331,24 +331,28 @@ class Agent:
             # 3c) Evaluate
             try:
 
-                bundle = load_spec_bundle(task)  # {"rubric":..., "eval_ref":..., "judge_prompt":..., "white_prompt":...}
+                bundle = load_spec_bundle(task)  # {rubric, eval_ref, judge_prompt, ...}
                 eval_ref = bundle.get("eval_ref", {}) or {}
-                spec = {
-                    # keep task metadata if you want to log/debug
-                    "task": task.model_dump(),
-                    # what evaluator needs
-                    "rubric": bundle["rubric"],
-                    "eval_ref": eval_ref,
-                    "judge_prompt": bundle.get("judge_prompt"),   # may be None
-                }
 
-                # decide whether to use gemini 
-                gemini = self.gemini_judge if (spec["rubric"].get("llm_checks") and spec.get("judge_prompt")) else None
-                report = evaluate_task(
-                    spec=spec,
-                    trace=submission_trace,
-                    gemini=gemini,
-                )
+                if bundle["rubric"]:
+                    # --- V1 path: private rubric available → full scoring ---
+                    spec = {
+                        "task": task.model_dump(),
+                        "rubric": bundle["rubric"],
+                        "eval_ref": eval_ref,
+                        "judge_prompt": bundle.get("judge_prompt"),
+                    }
+                    gemini = self.gemini_judge if (spec["rubric"].get("llm_checks") and spec.get("judge_prompt")) else None
+                    report = evaluate_task(
+                        spec=spec,
+                        trace=submission_trace,
+                        gemini=gemini,
+                    )
+                else:
+                    # --- V2 path: no rubric → public-safe contract validation ---
+                    from engine.contract_validator import validate_contract
+                    report = validate_contract(task, submission_trace)
+
             except Exception as e:
                 err_text = f"{type(e).__name__}: {e}"
                 _safe_write_text(task_eval_dir / "engine_error.txt", err_text)
