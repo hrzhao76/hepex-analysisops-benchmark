@@ -16,7 +16,7 @@ from tasks.task_spec import GreenConfig, TaskSpec, load_task_spec
 
 from utils import _utc_now_iso, _new_run_id, _safe_write_json, _safe_write_text
 from utils.atlas_download import ensure_atlas_open_data_downloaded  
-from engine.package_loader import load_spec_bundle
+from engine.package_loader import load_spec_bundle, load_solver_prompt
 from engine.prompt_render import _builtin_minimal_prompt
 from engine.evaluator import evaluate_task
 from engine.llm_judge_gemini import GeminiJudge
@@ -92,12 +92,9 @@ class Agent:
         # return {"task_id": task.id, "status": "error", "error": "call_white not implemented yet"}
 
         # ---- call_white path ----
-        bundle = load_spec_bundle(task)
-        # 1) prepare white prompt
-        if bundle.get("white_prompt"):
-            prompt = bundle["white_prompt"]
-        else:
-            prompt = _builtin_minimal_prompt(task.id, task.type)
+        # V2: use load_solver_prompt() which resolves solver_prompt.md first,
+        # then falls back to white_prompt.md (V1 compat).
+        prompt = load_solver_prompt(task) or _builtin_minimal_prompt(task.id, task.type)
 
         # optional: simple templating
         prompt = (
@@ -316,8 +313,16 @@ class Agent:
 
 
             # persist judge input snapshot (what engine sees)
+            # Sensitive eval fields are stripped so this file is safe to write
+            # in a public-facing run directory.
+            _SENSITIVE_TASK_FIELDS = {
+                "rubric_path", "eval_ref_path", "judge_prompt_path", "white_prompt_path"
+            }
             judge_input = {
-                "task_spec": task.model_dump(),  # pydantic v2
+                "task_spec": {
+                    k: v for k, v in task.model_dump().items()
+                    if k not in _SENSITIVE_TASK_FIELDS
+                },
                 "data_info": data_info,
                 "submission_trace": submission_trace,
             }
