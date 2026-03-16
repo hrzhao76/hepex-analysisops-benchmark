@@ -24,17 +24,29 @@ class TaskSpec(BaseModel):
     reuse_existing: bool = True
 
     # evaluation specs (relative to spec_dir by default)
-    spec_dir: str
-    rubric_path: str = "rubric.yaml"
-    judge_prompt_path: str = "judge_prompt.md"
-    eval_ref_path: Optional[str] = "eval_ref.yaml"
+    # NOTE: spec_dir is only used for V1 specs/ layout; V2 tasks_public/ tasks omit it.
+    spec_dir: Optional[str] = None
 
-    # (optional) for white agent request description
+    # --- Transitional compatibility fields ---
+    # These fields exist only for backward-compat with V1 specs/ layout.
+    # They should be removed in a later cleanup phase once private eval is
+    # fully decoupled from the public task contract.
+    rubric_path: Optional[str] = None
+    judge_prompt_path: Optional[str] = None
+    eval_ref_path: Optional[str] = None
+    white_prompt_path: Optional[str] = None  # V1 alias; prefer solver_prompt_path
+
+    # V2 public contract: solver prompt path
+    solver_prompt_path: Optional[str] = "solver_prompt.md"
+
+    # (optional) task description & constraints
     description: Optional[str] = None
     constraints: dict[str, Any] = Field(default_factory=dict)
 
     def resolve_path(self, rel: str | None) -> Optional[Path]:
         if not rel:
+            return None
+        if self.spec_dir is None:
             return None
         p = Path(self.spec_dir) / rel
         return p
@@ -42,7 +54,9 @@ class TaskSpec(BaseModel):
 
 class GreenConfig(BaseModel):
     data_dir: str = "/tmp/atlas_data_cache"
-    task_dirs: list[str] = Field(default_factory=lambda: ["specs/zpeak_fit", "specs/hyy"])
+    # V2: task directories live under tasks_public/ with numeric prefix.
+    # V1 specs/ paths still accepted for backward compatibility.
+    task_dirs: list[str] = Field(default_factory=lambda: ["tasks_public/t001_zpeak_fit"])
 
 
 def load_task_spec(spec_dir: str | Path) -> TaskSpec:
@@ -50,7 +64,7 @@ def load_task_spec(spec_dir: str | Path) -> TaskSpec:
     path = Path(spec_dir) / "task_spec.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
-    # enforce spec_dir from directory (source of truth)
-    data["spec_dir"] = spec_dir
+    # Inject spec_dir so package_loader can resolve relative paths (V1 compat)
+    data.setdefault("spec_dir", spec_dir)
 
     return TaskSpec.model_validate(data)

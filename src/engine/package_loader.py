@@ -10,8 +10,9 @@ import yaml
 class SpecBundle(TypedDict):
     rubric: Dict[str, Any]
     eval_ref: Dict[str, Any]
-    judge_prompt: Optional[str]   # None if not needed
-    white_prompt: Optional[str]   # None if missing
+    judge_prompt: Optional[str]   # None if not needed or not present
+    white_prompt: Optional[str]   # None if missing (V1 alias)
+    solver_prompt: Optional[str]  # V2: preferred prompt field
 
 
 def _read_yaml(path: Path) -> Dict[str, Any]:
@@ -45,46 +46,79 @@ def _safe_get(obj: Any, key: str, default: Any = None) -> Any:
 
 
 def load_spec_bundle(task: Any) -> SpecBundle:
+    """Load the V1 private spec bundle (rubric + eval_ref + judge_prompt + prompts).
+
+    For V2 tasks_public/ tasks, rubric_path / eval_ref_path / judge_prompt_path
+    will be None. In that case the corresponding bundle fields are returned as
+    empty / None rather than raising. Private eval falls back gracefully.
+    """
     spec_dir = _safe_get(task, "spec_dir")
-    if spec_dir is None:
-        raise ValueError("task must have 'spec_dir' attribute")
 
-    rubric_rel = _safe_get(task, "rubric_path", "rubric.yaml")
-    prompt_rel = _safe_get(task, "judge_prompt_path", "judge_prompt.md")
-    eval_ref_rel = _safe_get(task, "eval_ref_path", "eval_ref.yaml")
-    white_prompt_rel = _safe_get(task, "white_prompt_path", "white_prompt.md")
+    rubric_rel = _safe_get(task, "rubric_path", None)
+    prompt_rel = _safe_get(task, "judge_prompt_path", None)
+    eval_ref_rel = _safe_get(task, "eval_ref_path", None)
+    white_prompt_rel = _safe_get(task, "white_prompt_path", None)
 
-    # rubric required
-    rubric_path = _resolve_path(spec_dir, rubric_rel)
-    if not rubric_path.exists():
-        raise FileNotFoundError(f"rubric not found: {rubric_path}")
-    rubric = _read_yaml(rubric_path)
+    # rubric — required for private eval, but optional in public-safe tasks
+    rubric: Dict[str, Any] = {}
+    if spec_dir and rubric_rel:
+        rubric_path = _resolve_path(spec_dir, rubric_rel)
+        if rubric_path.exists():
+            rubric = _read_yaml(rubric_path)
 
-    # eval_ref optional
+    # eval_ref — optional always
     eval_ref: Dict[str, Any] = {}
-    if eval_ref_rel:
+    if spec_dir and eval_ref_rel:
         p = _resolve_path(spec_dir, eval_ref_rel)
         if p.exists():
             eval_ref = _read_yaml(p)
 
-    # judge_prompt only if llm_checks exist
+    # judge_prompt — only if llm_checks exist and spec_dir is available
     judge_prompt: Optional[str] = None
-    if _has_llm_checks(rubric):
+    if spec_dir and _has_llm_checks(rubric) and prompt_rel:
         p = _resolve_path(spec_dir, prompt_rel)
-        if not p.exists():
-            raise FileNotFoundError(f"rubric has llm_checks but judge_prompt not found: {p}")
-        judge_prompt = _read_text(p)
+        if p.exists():
+            judge_prompt = _read_text(p)
 
-    # white_prompt optional (do NOT require)
+    # white_prompt (V1 alias) — optional, do NOT require
     white_prompt: Optional[str] = None
-    if white_prompt_rel:
+    if spec_dir and white_prompt_rel:
         p = _resolve_path(spec_dir, white_prompt_rel)
         if p.exists():
             white_prompt = _read_text(p)
 
+    # solver_prompt (V2) — resolved separately via load_solver_prompt()
     return {
         "rubric": rubric,
         "eval_ref": eval_ref,
         "judge_prompt": judge_prompt,
         "white_prompt": white_prompt,
+        "solver_prompt": None,  # populated by load_solver_prompt() if needed
     }
+
+
+def load_solver_prompt(task: Any) -> Optional[str]:
+    """Load the public solver prompt for a task.
+
+    Resolution order (V2-first):
+      1. solver_prompt_path  (V2: tasks_public/<task>/solver_prompt.md)
+      2. white_prompt_path   (V1 compat alias)
+      3. None if neither found
+    """
+    spec_dir = _safe_get(task, "spec_dir")
+
+    # Try V2 solver_prompt_path first
+    solver_prompt_rel = _safe_get(task, "solver_prompt_path", None)
+    if solver_prompt_rel and spec_dir:
+        p = _resolve_path(spec_dir, solver_prompt_rel)
+        if p.exists():
+            return _read_text(p)
+
+    # Fallback to V1 white_prompt_path
+    white_prompt_rel = _safe_get(task, "white_prompt_path", None)
+    if white_prompt_rel and spec_dir:
+        p = _resolve_path(spec_dir, white_prompt_rel)
+        if p.exists():
+            return _read_text(p)
+
+    return None
