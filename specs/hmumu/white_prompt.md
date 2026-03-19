@@ -25,7 +25,8 @@ Implement the following cuts sequence. Record the number of events passing each 
 8. **VBF Tagging**:
     - At least 2 jets with $p_T > 30$ GeV and $E > 30$ GeV.
     - $m_{jj} > 500$ GeV.
-    - $|\Delta\eta_{jj}| > 3.0$ and opposite hemispheres ($\eta_1 \cdot \eta_2 < 0$).
+    - $|\Delta\eta_{jj}| > 3.0$ 
+    - Jets in opposite hemispheres ($\eta_1 \cdot \eta_2 < 0$).
     - Separation: $\Delta R(\mu, j) \ge 0.4$ for all combinations of muons and tagging jets.
 9. **Jet Veto (b-tag)**: No jet have b-tagging score >= 3. (Lower b-tagging scores indicate a higher probability of the jet contains b-quarks from decays of top quarks, which could contain non-prompt background muons.)
 
