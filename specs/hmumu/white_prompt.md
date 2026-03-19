@@ -6,24 +6,29 @@ Analyze the ATLAS Open Data (Release 2025e-13tev-beta) to search for the Higgs b
 ## Physics Context
 The $H \rightarrow \mu^+ \mu^-$ decay is rare (branching ratio ~2e-4) and sits on a large Drell-Yan background. To improve sensitivity, we target the VBF production mode, characterized by two energetic forward "tagging" jets with a large rapidity gap and high invariant mass.
 
+## Data & environment
+- You will receive a list of local ROOT file paths.
+- Use at most 1 file.
+- You may inspect the ROOT schema (trees/branches) if needed.
+
 ## Analysis Steps
 
 ### 1. Event Selection
 Implement the following cuts sequence. Record the number of events passing each step.
-1.  **Trigger**: Single muon trigger `trigM`.
-2.  **Trigger Match**: At least one muon matched to the trigger.
-3.  **Two Muons**: Exactly 2 muons (Type 13).
-4.  **Kinematics**: Both muons $p_T > 30$ GeV.
-5.  **Charge**: Opposite charge ($\sum q = 0$).
-6.  **MET**: $E_T^{miss} \le 80$ GeV (suppress $t\bar{t}$).
-7.  **Quality**: Medium ID, Loose Iso for both muons.
-8.  **Jet Veto (b-tag)**: No b-tagged jets (quantile < 3 is b-tag, so require all jets >= 3 or similar check). Explicitly: Veto events with any b-tagged jets to suppress $t\bar{t}$.
-9.  **VBF Tagging**:
-    - At least 2 jets with $p_T > 30$ GeV.
+1. **Trigger**: Single muon trigger `trigM`.
+2. **Trigger Match**: At least one muon matched to the trigger.
+3. **Two Muons**: Exactly 2 muons (Type 13).
+4. **Kinematics**: Both muons $p_T > 30$ GeV.
+5. **Charge**: Opposite charge ($\sum q = 0$).
+6. **MET**: $E_T^{miss} \le 80$ GeV (suppress $t\bar{t}$).
+7. **Quality**: Medium ID, Loose Iso for both muons.
+8. **VBF Tagging**:
+    - At least 2 jets with $p_T > 30$ GeV and $E > 30$ GeV.
     - $m_{jj} > 500$ GeV.
     - $|\Delta\eta_{jj}| > 3.0$.
     - Jets in opposite hemispheres ($\eta_1 \cdot \eta_2 < 0$).
-    - Separation: $\Delta R(\mu, j) > 0.4$ for all combinations.
+    - Separation: $\Delta R(\mu, j) \ge 0.4$ for all combinations of muons and tagging jets.
+9. **Jet Veto (b-tag)**: No jet have b-tagging score >= 3. (Lower b-tagging scores indicate a higher probability of the jet contains b-quarks from decays of top quarks, which could contain non-prompt background muons.)
 
 ### 2. Signal Extraction
 Fit the dimuon invariant mass distribution ($m_{\mu\mu}$) in the range [110, 160] GeV.
@@ -56,3 +61,9 @@ Return a JSON object with the following structure:
   }
 }
 ```
+
+## Guidance
+- Briefly justify the fit model and fit range.
+- IMPORTANT: Only report values that came from actual tool calls. Do not fabricate results.
+- If you cannot complete, set status="error" and explain in "comments".
+- Output JSON only, no markdown code blocks or extra text.
