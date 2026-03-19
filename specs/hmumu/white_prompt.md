@@ -6,6 +6,12 @@ Analyze the ATLAS Open Data (Release 2025e-13tev-beta) to search for the Higgs b
 ## Physics Context
 The $H \rightarrow \mu^+ \mu^-$ decay is rare (branching ratio ~2e-4) and sits on a large Drell-Yan background. To improve sensitivity, we target the VBF production mode, characterized by two energetic forward "tagging" jets with a large rapidity gap and high invariant mass.
 
+## Data & environment
+
+- You will receive a list of local ROOT file paths.
+- Use at most 1 file.
+- You may inspect the ROOT schema (trees/branches) if needed.
+
 ## Analysis Steps
 
 ### 1. Event Selection
@@ -63,3 +69,10 @@ Return a JSON object with the following structure:
   }
 }
 ```
+
+## Guidance
+
+- Briefly justify the fit model and fit range.
+- IMPORTANT: Only report values that came from actual tool calls. Do not fabricate results.
+- If you cannot complete, set status="error" and explain in "comments".
+- Output JSON only, no markdown code blocks or extra text.

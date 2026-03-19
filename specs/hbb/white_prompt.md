@@ -3,7 +3,14 @@
 ## Objective
 Analyze the ATLAS Open Data (Release 2025e-13tev-beta) to search for the Higgs boson decaying into a pair of b-quarks ($H \rightarrow b\bar{b}$) produced in association with a Z boson decaying to neutrinos ($Z \rightarrow \nu\bar{\nu}$). This is known as the "0-lepton" channel.
 
+## Data & environment
+
+- You will receive a list of local ROOT file paths.
+- Use at most 1 file.
+- You may inspect the ROOT schema (trees/branches) if needed.
+
 ## Physics Context
+
 The $H \rightarrow b\bar{b}$ decay has the largest branching ratio (~58%) but suffers from massive QCD backgrounds. The VH production mode allows us to trigger on large Missing Transverse Energy (MET) from the Z boson decay, significantly reducing background.
 
 ## Analysis Steps
@@ -57,3 +64,10 @@ Return a JSON object with the following structure:
   }
 }
 ```
+
+## Guidance
+
+- Briefly justify the fit model and fit range.
+- IMPORTANT: Only report values that came from actual tool calls. Do not fabricate results.
+- If you cannot complete, set status="error" and explain in "comments".
+- Output JSON only, no markdown code blocks or extra text.
