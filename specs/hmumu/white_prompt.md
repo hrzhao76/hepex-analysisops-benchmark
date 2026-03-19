@@ -22,9 +22,9 @@ Implement the following cuts sequence. Record the number of events passing each 
 5. **Charge**: Opposite charge ($\sum q = 0$).
 6. **MET**: $E_T^{miss} \le 80$ GeV (suppress $t\bar{t}$).
 7. **Quality**: Medium ID, Loose Iso for both muons.
-8. **Jet Veto (b-tag)**: To suppress $t\bar{t}$ background, require that NO jets have a b-tagging quantile < 3 (i.e., `ak.sum(jet_btag_quantile < 3) == 0`).
+8. **Jet Veto (b-tag)**: To suppress $t\bar{t}$ background, require that no jets have a b-tagging quantile < 3 (i.e., `ak.sum(jet_btag_quantile < 3) == 0`).
 9. **VBF Tagging**:
-    - At least 2 jets with $p_T > 30$ GeV **AND $E > 30$ GeV**.
+    - At least 2 jets with $p_T > 30$ GeV and $E > 30$ GeV.
     - $m_{jj} > 500$ GeV.
     - $|\Delta\eta_{jj}| > 3.0$ and opposite hemispheres ($\eta_1 \cdot \eta_2 < 0$).
     - Separation: $\Delta R(\mu, j) \ge 0.4$ for all combinations of muons and tagging jets.
