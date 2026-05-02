@@ -225,7 +225,7 @@ def main() -> None:
         "--task-dir",
         type=Path,
         default=None,
-        help="Export a single task from this task directory. Omit to export default L1+L2 tasks.",
+        help="Export a single task from this task directory. Omit to export default L1+L2+L3 tasks.",
     )
     parser.add_argument(
         "--private-rubric",
