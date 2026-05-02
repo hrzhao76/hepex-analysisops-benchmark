@@ -1,17 +1,21 @@
 import os
 import sys
-import shutil
 import time
+import socket
 import subprocess
 import httpx
 import pytest
-import yaml
 
 def pytest_addoption(parser):
     parser.addoption(
         "--agent-url",
         default=None,
         help="External Agent URL (if provided, skips auto-start)",
+    )
+    parser.addoption(
+        "--agent-port",
+        default=None,
+        help="Port for the auto-started local agent. Defaults to a free port; set 9009 for script-driven local testing.",
     )
 
 
@@ -44,7 +48,13 @@ def agent(request, tmp_path_factory):
     env["PYTHONPATH"] = "src" 
 
     host = "127.0.0.1"
-    port = 9009
+    requested_port = request.config.getoption("--agent-port") or os.getenv("HEPEX_TEST_AGENT_PORT")
+    if requested_port:
+        port = int(requested_port)
+    else:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((host, 0))
+            port = sock.getsockname()[1]
     cmd = [sys.executable, "src/server.py", "--host", host, "--port", str(port)]
     
     proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

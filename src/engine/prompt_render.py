@@ -16,8 +16,8 @@ def render_judge_prompt(template: str,
     return (template
             .replace("{{RUBRIC}}", pretty(rubric))
             .replace("{{EVAL_REF}}", pretty(eval_ref))
-            .replace("{{WORKFLOW_REF}}", pretty(eval_ref))  # backward compat
-            .replace("{{SUBMISSION_TRACE}}", pretty(trace))
+            .replace("{{WORKFLOW_REF}}", pretty(eval_ref))
+            .replace("{{SUBMISSION_EVIDENCE}}", pretty(trace))
             .replace("{{RULE_SIGNALS}}", pretty(rule_signals))
             .replace("{{RULE_ISSUES}}", pretty(rule_issues)))
 
@@ -28,25 +28,22 @@ You are solving a benchmark task.
 Task ID: {task_id}
 Task Type: {task_type}
 
-You must return a JSON object named SUBMISSION_TRACE.
-This JSON will be used for automated evaluation.
+You must return a submission_bundle_v1 JSON object.
+The bundle artifacts will be materialized and validated against the public contract.
 
 Required rules:
 - Output JSON only. No extra text.
-- If the task fails, set "status" = "error" and explain briefly.
+- If the task fails, set top-level "status" = "error" and explain briefly in an artifact when possible.
 
-SUBMISSION_TRACE schema (minimum required fields):
+Minimum response shape:
 {{
-  "task_id": "{task_id}",
   "status": "ok" | "error",
-  "result": object,
-  "method": object,
-  "comments": string
+  "artifacts": {{
+    "<canonical_filename>": object | string
+  }}
 }}
 
 Notes:
-- Include in "result" any task outputs you computed.
-- Include in "method" a brief description of how you produced the result.
-- Missing fields may result in score penalties.
+- Use exactly the canonical filenames declared in submission_contract.yaml.
+- Missing artifacts or schema fields will fail the public contract.
 """
-

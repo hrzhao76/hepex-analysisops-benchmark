@@ -23,30 +23,49 @@ If you need, you may inspect the file schema (trees/branches). Record chosen tre
 - Sanity check units: the Z peak should be around 91 GeV. If values look like ~91000, treat as MeV and convert to GeV.
 - Fit in a reasonable window around the Z peak (e.g., 70–110 GeV) with a simple model (e.g., Gaussian with/without a smooth background). State your model and why.
 
-## Output format (SUBMISSION_TRACE JSON)
-Return a JSON object with:
+## Output format
+Return a `submission_bundle_v1` JSON object. Put the primary fit result in
+`fit_summary.json`, a short explanation in `interpretation.md`, and workflow
+metadata in `submission_trace.json`.
 
 ```json
 {
-  "task_id": "{{TASK_ID}}",
   "status": "ok" | "error",
-  "fit_result": {
-    "mu": number,
-    "sigma": number,
-    "gof": {
-      "p_value": number,
-      "chi2_ndof": number
+  "artifacts": {
+    "fit_summary.json": {
+      "task_id": "{{TASK_ID}}",
+      "status": "ok" | "error",
+      "fit_result": {
+        "mu": number,
+        "sigma": number,
+        "gof": {
+          "p_value": number,
+          "chi2_ndof": number
+        }
+      },
+      "fit_method": {
+        "model": string,
+        "fit_range": [number, number],
+        "binned_or_unbinned": "binned" | "unbinned",
+        "optimizer": "scipy.curve_fit",
+        "initial_params": object,
+        "uncertainties_method": "covariance"
+      },
+      "comments": string
+    },
+    "interpretation.md": "short explanation of the selected muon pair, fit model, and result",
+    "submission_trace.json": {
+      "task_id": "{{TASK_ID}}",
+      "status": "ok" | "error",
+      "workflow_stages": [
+        {"stage_id": "data_loading", "order_index": 1, "status": "ok"},
+        {"stage_id": "muon_pair_selection", "order_index": 2, "status": "ok"},
+        {"stage_id": "mass_spectrum", "order_index": 3, "status": "ok"},
+        {"stage_id": "z_peak_fit", "order_index": 4, "status": "ok"}
+      ],
+      "output_files_generated": ["fit_summary.json", "interpretation.md", "submission_trace.json"]
     }
-  },
-  "fit_method": {
-    "model": string,
-    "fit_range": [number, number],
-    "binned_or_unbinned": "binned" | "unbinned",
-    "optimizer": "scipy.curve_fit",
-    "initial_params": object,
-    "uncertainties_method": "covariance"
-  },
-  "comments": string
+  }
 }
 ```
 
@@ -56,4 +75,3 @@ Return a JSON object with:
 - For `optimizer`: The `fit_peak_tool` uses `scipy.optimize.curve_fit`, so report `"scipy.curve_fit"`.
 - If you cannot complete, set status="error" and explain in "comments".
 - Output JSON only, no markdown code blocks or extra text.
-

@@ -23,20 +23,9 @@ class TaskSpec(BaseModel):
     cache: bool = True
     reuse_existing: bool = True
 
-    # evaluation specs (relative to spec_dir by default)
-    # NOTE: spec_dir is only used for V1 specs/ layout; V2 tasks_public/ tasks omit it.
+    # Task directory containing task_spec.yaml and public contract files.
     spec_dir: Optional[str] = None
 
-    # --- Transitional compatibility fields ---
-    # These fields exist only for backward-compat with V1 specs/ layout.
-    # They should be removed in a later cleanup phase once private eval is
-    # fully decoupled from the public task contract.
-    rubric_path: Optional[str] = None
-    judge_prompt_path: Optional[str] = None
-    eval_ref_path: Optional[str] = None
-    white_prompt_path: Optional[str] = None  # V1 alias; prefer solver_prompt_path
-
-    # V2 public contract: solver prompt path
     solver_prompt_path: Optional[str] = "solver_prompt.md"
     submission_contract_path: Optional[str] = "submission_contract.yaml"
 
@@ -47,8 +36,9 @@ class TaskSpec(BaseModel):
 
     # Capability-driven execution routing
     input_strategy: Literal["download", "shared_manifest"] = "download"
-    solver_response_mode: Literal["submission_trace", "submission_bundle_v1"] = "submission_trace"
-    evaluation_mode: Literal["legacy_trace_contract", "directory_contract_and_private_l1"] = "legacy_trace_contract"
+    solver_response_mode: Literal["submission_bundle_v1"] = "submission_bundle_v1"
+    solver_backend: Optional[str] = None
+    evaluation_mode: Literal["directory_contract_and_private_l1"] = "directory_contract_and_private_l1"
 
     # Task capabilities and defaults for large-input tasks.
     requires_large_input_data: bool = False
@@ -74,13 +64,13 @@ class TaskRuntimeOverride(BaseModel):
     release: Optional[str] = None
     dataset: Optional[str] = None
     skim: Optional[str] = None
+    solver_backend: Optional[str] = None
 
 
 class GreenConfig(BaseModel):
     data_dir: str = "/tmp/atlas_data_cache"
-    # V2: task directories live under tasks_public/ with numeric prefix.
-    # V1 specs/ paths still accepted for backward compatibility.
     task_dirs: list[str] = Field(default_factory=lambda: ["tasks_public/t001_zpeak_fit"])
+    solver_backend: str = "agent_1_oh"
     input_access_mode: Optional[Literal["scenario_shared_mount", "local_shared_mount"]] = None
     shared_input_dir: Optional[str] = None
     input_manifest_path: Optional[str] = None
@@ -94,7 +84,7 @@ def load_task_spec(spec_dir: str | Path) -> TaskSpec:
     path = Path(spec_dir) / "task_spec.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
-    # Inject spec_dir so package_loader can resolve relative paths (V1 compat)
+    # Inject spec_dir so loaders can resolve public contract files.
     data.setdefault("spec_dir", spec_dir)
 
     return TaskSpec.model_validate(data)

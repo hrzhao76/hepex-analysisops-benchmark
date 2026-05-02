@@ -10,7 +10,9 @@ import yaml
 from a2a.utils import new_agent_text_message
 
 from agent import Agent
+from engine.benchmark_engine import BenchmarkEngine
 from engine.contract_validator import validate_submission_dir
+from engine.evaluation import EvaluationEngine
 from engine.input_access import InputAccessError, resolve_input_access
 from engine.package_loader import load_private_l1_rubric, load_submission_contract
 from engine.secret_store import SecretStore
@@ -20,7 +22,7 @@ from utils.mock_private_rubrics import hyy_l1_private_rubric
 
 
 TASK_DIR = Path(__file__).parent.parent / "tasks_public" / "t002_hyy_v5_l1"
-LEGACY_TASK_DIR = Path(__file__).parent.parent / "tasks_public" / "t001_zpeak_fit"
+ZPEAK_TASK_DIR = Path(__file__).parent.parent / "tasks_public" / "t001_zpeak_fit"
 
 
 def sample_submission_bundle() -> dict:
@@ -118,6 +120,13 @@ def sample_submission_bundle() -> dict:
                 "reported_result": {
                     "signal_peak_position": 125.1,
                 },
+                "input_files_used": ["events.root"],
+                "input_file_count": 1,
+                "selected_events_total": 11,
+                "cutflow_summary": {
+                    "input_events": 42,
+                    "selected_events": 11,
+                },
             },
         },
     }
@@ -143,11 +152,12 @@ def canonical_hyy_task(**updates):
     return task.model_copy(update=canonical)
 
 
-def test_task_spec_capability_defaults_for_legacy_task():
-    task = load_task_spec(LEGACY_TASK_DIR)
+@pytest.mark.parametrize("task_dir", [ZPEAK_TASK_DIR, TASK_DIR])
+def test_public_tasks_use_bundle_directory_contract(task_dir):
+    task = load_task_spec(task_dir)
     assert task.input_strategy == "download"
-    assert task.solver_response_mode == "submission_trace"
-    assert task.evaluation_mode == "legacy_trace_contract"
+    assert task.solver_response_mode == "submission_bundle_v1"
+    assert task.evaluation_mode == "directory_contract_and_private_l1"
 
 
 def test_task_spec_capability_overrides_for_hyy_task():
@@ -227,9 +237,9 @@ def test_validate_task_capabilities_rejects_missing_contract_for_bundle_mode(tmp
         input_manifest_path=str(tmp_path / "input_manifest.json"),
         allow_green_download=False,
     )
-    agent = Agent()
+    engine = BenchmarkEngine()
     with pytest.raises(SubmissionBundleError):
-        agent._validate_task_capabilities(task, cfg)
+        engine._validate_task_capabilities(task, cfg)
 
 
 def test_apply_task_runtime_override_updates_allowed_fields():
@@ -246,8 +256,8 @@ def test_apply_task_runtime_override_updates_allowed_fields():
         },
     )
 
-    agent = Agent()
-    effective, applied = agent._apply_task_runtime_override(task, cfg)
+    engine = BenchmarkEngine()
+    effective, applied = engine._apply_task_runtime_override(task, cfg)
 
     assert effective is not None
     assert effective.mode == "mock"
@@ -263,30 +273,29 @@ def test_apply_task_runtime_override_updates_allowed_fields():
 
 
 def test_secret_backed_judge_falls_back_to_process_judge_when_secret_env_missing(monkeypatch):
-    agent = Agent()
     fallback_judge = object()
-    agent.llm_judge = fallback_judge
+    engine = EvaluationEngine(fallback_judge=fallback_judge)
 
     task = canonical_hyy_task()
     monkeypatch.setenv("GREEN_SECRETS_JSON", make_secret_store_payload(task))
     secret_store = SecretStore()
 
-    assert agent._build_secret_backed_judge(secret_store) is fallback_judge
+    assert engine._build_secret_backed_judge(secret_store) is fallback_judge
 
 
 def test_secret_backed_judge_falls_back_to_process_judge_when_secret_env_invalid(monkeypatch):
-    agent = Agent()
     fallback_judge = object()
-    agent.llm_judge = fallback_judge
+    engine = EvaluationEngine(
+        fallback_judge=fallback_judge,
+        judge_factory=lambda: (_ for _ in ()).throw(RuntimeError("missing secret-backed key")),
+    )
 
     task = canonical_hyy_task()
     payload = json.loads(make_secret_store_payload(task))
     payload["judge_env"] = {"HEPEX_JUDGE_PROVIDER": "openai"}
     secret_store = SecretStore(json.dumps(payload))
 
-    monkeypatch.setattr("agent.get_judge", lambda: (_ for _ in ()).throw(RuntimeError("missing secret-backed key")))
-
-    assert agent._build_secret_backed_judge(secret_store) is fallback_judge
+    assert engine._build_secret_backed_judge(secret_store) is fallback_judge
 
 
 def test_parse_submission_bundle_rejects_large_payload():
@@ -350,11 +359,10 @@ async def test_agent_hyy_v5_l1_submission_bundle_flow(monkeypatch, tmp_path):
         return json.dumps(sample_submission_bundle())
 
     monkeypatch.setattr("messenger.Messenger.talk_to_agent", fake_talk_to_agent)
-    monkeypatch.setattr("agent.load_task_spec", lambda _: task)
     monkeypatch.setenv("GREEN_SECRETS_JSON", make_secret_store_payload(task))
 
     req = {
-        "participants": {"white_agent": "http://example.com"},
+        "participants": {"purple_agent": "http://example.com"},
         "config": {
             "task_dirs": [str(TASK_DIR)],
             "data_dir": str(tmp_path / "runs"),
@@ -367,7 +375,8 @@ async def test_agent_hyy_v5_l1_submission_bundle_flow(monkeypatch, tmp_path):
 
     updater = DummyUpdater()
     agent = Agent()
-    monkeypatch.setattr(agent, "_build_secret_backed_judge", lambda secret_store: None)
+    agent.benchmark_engine.task_loader = lambda _: task
+    monkeypatch.setattr(agent.benchmark_engine.evaluation_engine, "_build_secret_backed_judge", lambda secret_store: None)
     await agent.run(new_agent_text_message(json.dumps(req)), updater)
 
     assert updater.rejected is None
@@ -378,6 +387,8 @@ async def test_agent_hyy_v5_l1_submission_bundle_flow(monkeypatch, tmp_path):
     assert payload["data"]["shared_input_dir"] == str(shared_input)
     assert payload["data"]["read_only_for_solver"] is True
     assert payload["data"]["max_files"] == task.max_files
+    assert payload["data"]["work_dir"].endswith(f"/{task.id}/solver_work")
+    assert payload["data"]["output_dir"] == payload["data"]["work_dir"]
 
     runs_root = Path(req["config"]["data_dir"]) / "runs"
     run_dirs = [path for path in runs_root.iterdir() if path.is_dir()]
@@ -412,12 +423,7 @@ async def test_agent_download_strategy_delegates_download_to_solver(monkeypatch,
         captured["message"] = json.loads(message)
         return json.dumps(sample_submission_bundle())
 
-    def fail_if_green_downloads(**kwargs):
-        raise AssertionError("green should not download when input_strategy=download")
-
-    monkeypatch.setattr("agent.load_task_spec", lambda _: task)
     monkeypatch.setattr("messenger.Messenger.talk_to_agent", fake_talk_to_agent)
-    monkeypatch.setattr("agent.ensure_atlas_open_data_downloaded", fail_if_green_downloads)
     monkeypatch.setenv("GREEN_SECRETS_JSON", make_secret_store_payload(task))
 
     req = {
@@ -430,7 +436,8 @@ async def test_agent_download_strategy_delegates_download_to_solver(monkeypatch,
 
     updater = DummyUpdater()
     agent = Agent()
-    monkeypatch.setattr(agent, "_build_secret_backed_judge", lambda secret_store: None)
+    agent.benchmark_engine.task_loader = lambda _: task
+    monkeypatch.setattr(agent.benchmark_engine.evaluation_engine, "_build_secret_backed_judge", lambda secret_store: None)
     await agent.run(new_agent_text_message(json.dumps(req)), updater)
 
     assert updater.rejected is None
@@ -440,6 +447,8 @@ async def test_agent_download_strategy_delegates_download_to_solver(monkeypatch,
     assert payload["data"]["skim"] == task.skim
     assert payload["data"]["max_files"] == task.max_files
     assert payload["data"]["input_strategy"] == "download"
+    assert payload["data"]["work_dir"].endswith(f"/{task.id}/solver_work")
+    assert payload["data"]["output_dir"] == payload["data"]["work_dir"]
 
     runs_root = Path(req["config"]["data_dir"]) / "runs"
     run_dirs = [path for path in runs_root.iterdir() if path.is_dir()]
@@ -456,7 +465,6 @@ async def test_agent_hyy_v5_l1_mock_mode_scores_from_private_rubric(monkeypatch,
     (shared_input / "events.root").write_text("placeholder", encoding="utf-8")
 
     task = canonical_hyy_task(mode="mock")
-    monkeypatch.setattr("agent.load_task_spec", lambda _: task)
     monkeypatch.setenv("GREEN_SECRETS_JSON", make_secret_store_payload(task))
 
     req = {
@@ -473,7 +481,8 @@ async def test_agent_hyy_v5_l1_mock_mode_scores_from_private_rubric(monkeypatch,
 
     updater = DummyUpdater()
     agent = Agent()
-    monkeypatch.setattr(agent, "_build_secret_backed_judge", lambda secret_store: None)
+    agent.benchmark_engine.task_loader = lambda _: task
+    monkeypatch.setattr(agent.benchmark_engine.evaluation_engine, "_build_secret_backed_judge", lambda secret_store: None)
     await agent.run(new_agent_text_message(json.dumps(req)), updater)
 
     assert updater.rejected is None
@@ -501,7 +510,6 @@ async def test_agent_hyy_v5_l1_mock_mode_scores_from_private_rubric(monkeypatch,
 @pytest.mark.asyncio
 async def test_agent_hyy_v5_l1_mock_mode_can_run_without_shared_mount(monkeypatch, tmp_path):
     task = canonical_hyy_task(mode="mock")
-    monkeypatch.setattr("agent.load_task_spec", lambda _: task)
     monkeypatch.setenv("GREEN_SECRETS_JSON", make_secret_store_payload(task))
 
     req = {
@@ -514,7 +522,8 @@ async def test_agent_hyy_v5_l1_mock_mode_can_run_without_shared_mount(monkeypatc
 
     updater = DummyUpdater()
     agent = Agent()
-    monkeypatch.setattr(agent, "_build_secret_backed_judge", lambda secret_store: None)
+    agent.benchmark_engine.task_loader = lambda _: task
+    monkeypatch.setattr(agent.benchmark_engine.evaluation_engine, "_build_secret_backed_judge", lambda secret_store: None)
     await agent.run(new_agent_text_message(json.dumps(req)), updater)
 
     assert updater.rejected is None
@@ -538,8 +547,6 @@ async def test_agent_hyy_v5_l1_mock_mode_can_run_without_shared_mount(monkeypatc
 @pytest.mark.asyncio
 async def test_agent_skips_task_when_override_disables_it(monkeypatch, tmp_path):
     task = canonical_hyy_task()
-    monkeypatch.setattr("agent.load_task_spec", lambda _: task)
-
     req = {
         "participants": {},
         "config": {
@@ -556,6 +563,7 @@ async def test_agent_skips_task_when_override_disables_it(monkeypatch, tmp_path)
 
     updater = DummyUpdater()
     agent = Agent()
+    agent.benchmark_engine.task_loader = lambda _: task
     await agent.run(new_agent_text_message(json.dumps(req)), updater)
 
     runs_root = Path(req["config"]["data_dir"]) / "runs"
@@ -565,14 +573,17 @@ async def test_agent_skips_task_when_override_disables_it(monkeypatch, tmp_path)
 
     summary_artifacts = [artifact for artifact in updater.artifacts if artifact[0] == "Summary"]
     assert len(summary_artifacts) == 1
-    summary_payload = summary_artifacts[0][1][1].root.data
+    assert len(summary_artifacts[0][1]) == 1
+    assert "Done." in summary_artifacts[0][1][0].root.text
+
+    summary_payload = json.loads((run_dirs[0] / "run_summary.json").read_text(encoding="utf-8"))
     assert summary_payload["tasks"] == []
     assert summary_payload["score_total"] == 0.0
     assert summary_payload["score_max"] == 0.0
 
 
 @pytest.mark.asyncio
-async def test_agent_hyy_v5_l1_reports_rubric_unavailable(monkeypatch, tmp_path):
+async def test_agent_hyy_v5_l1_reports_public_score_when_hidden_rubric_unavailable(monkeypatch, tmp_path):
     shared_input = tmp_path / "shared_input"
     shared_input.mkdir()
     (shared_input / "events.root").write_text("placeholder", encoding="utf-8")
@@ -583,11 +594,10 @@ async def test_agent_hyy_v5_l1_reports_rubric_unavailable(monkeypatch, tmp_path)
         return json.dumps(sample_submission_bundle())
 
     monkeypatch.setattr("messenger.Messenger.talk_to_agent", fake_talk_to_agent)
-    monkeypatch.setattr("agent.load_task_spec", lambda _: task)
     monkeypatch.setenv("GREEN_SECRETS_JSON", make_secret_store_payload_with_wrong_hash(task))
 
     req = {
-        "participants": {"white_agent": "http://example.com"},
+        "participants": {"purple_agent": "http://example.com"},
         "config": {
             "task_dirs": [str(TASK_DIR)],
             "data_dir": str(tmp_path / "runs"),
@@ -600,6 +610,7 @@ async def test_agent_hyy_v5_l1_reports_rubric_unavailable(monkeypatch, tmp_path)
 
     updater = DummyUpdater()
     agent = Agent()
+    agent.benchmark_engine.task_loader = lambda _: task
     await agent.run(new_agent_text_message(json.dumps(req)), updater)
 
     runs_root = Path(req["config"]["data_dir"]) / "runs"
@@ -608,15 +619,18 @@ async def test_agent_hyy_v5_l1_reports_rubric_unavailable(monkeypatch, tmp_path)
     task_dir = run_dirs[0] / task.id
 
     report = json.loads((task_dir / "judge_output.json").read_text(encoding="utf-8"))
-    assert report["status"] == "rubric_unavailable"
+    assert report["status"] == "public_ok_hidden_unavailable"
     assert report["hard_checks_passed"] is True
+    assert report["public_scores"]["contract_pass"] == 1.0
+    assert report["hidden_scores"]["status"] == "unavailable"
+    assert report["final"]["normalized_score"] == 1.0
     assert report["dimension_scores"] == {
-        "execution": 0.0,
-        "pipeline": 0.0,
-        "implementation": 0.0,
-        "reasoning": 0.0,
-        "analysis": 0.0,
-        "validation": 0.0,
+        "execution": None,
+        "pipeline": None,
+        "implementation": None,
+        "reasoning": None,
+        "analysis": None,
+        "validation": None,
     }
     assert any(issue["code"] == "PRIVATE_RUBRIC_UNAVAILABLE" for issue in report["issues"])
 
@@ -628,7 +642,6 @@ async def test_hyy_v5_l1_green_report_is_leaderboard_ready(monkeypatch, tmp_path
     (shared_input / "events.root").write_text("placeholder", encoding="utf-8")
 
     task = canonical_hyy_task(mode="mock")
-    monkeypatch.setattr("agent.load_task_spec", lambda _: task)
     monkeypatch.setenv("GREEN_SECRETS_JSON", make_secret_store_payload(task))
 
     req = {
@@ -645,7 +658,8 @@ async def test_hyy_v5_l1_green_report_is_leaderboard_ready(monkeypatch, tmp_path
 
     updater = DummyUpdater()
     agent = Agent()
-    monkeypatch.setattr(agent, "_build_secret_backed_judge", lambda secret_store: None)
+    agent.benchmark_engine.task_loader = lambda _: task
+    monkeypatch.setattr(agent.benchmark_engine.evaluation_engine, "_build_secret_backed_judge", lambda secret_store: None)
     await agent.run(new_agent_text_message(json.dumps(req)), updater)
 
     runs_root = Path(req["config"]["data_dir"]) / "runs"
@@ -675,11 +689,9 @@ async def test_agent_routes_by_capability_not_task_id(monkeypatch, tmp_path):
     (shared_input / "events.root").write_text("placeholder", encoding="utf-8")
 
     task = canonical_hyy_task(id="t999_custom_l1")
-    captured = {"prepare": 0, "trace": 0, "bundle": 0, "eval": 0}
+    captured = {"prepare": 0, "bundle": 0, "eval": 0}
 
-    monkeypatch.setattr("agent.load_task_spec", lambda _: task)
-
-    async def fake_prepare(self, task, cfg, base_data_dir, task_eval_dir, updater):
+    async def fake_prepare(self, task, cfg, task_eval_dir, observer):
         captured["prepare"] += 1
         return (
             {
@@ -694,17 +706,14 @@ async def test_agent_routes_by_capability_not_task_id(monkeypatch, tmp_path):
             },
         )
 
-    async def fake_bundle(self, task, request, task_eval_dir, data_info, input_manifest, persist_payloads):
+    async def fake_bundle(self, task, task_eval_dir, input_manifest, persist_payloads, solver_transport, solver_backend):
         captured["bundle"] += 1
+        assert solver_backend == "agent_1_oh"
         submission_trace = sample_submission_bundle()["artifacts"]["submission_trace.json"]
         (task_eval_dir / "submission_trace.json").write_text(json.dumps(submission_trace), encoding="utf-8")
         return {"submission_trace": submission_trace}
 
-    async def fake_trace(self, task, request, data_info):
-        captured["trace"] += 1
-        return {"task_id": task.id, "status": "ok"}
-
-    def fake_evaluate(self, task, task_eval_dir, submission_trace, data_info):
+    def fake_evaluate(self, task, task_eval_dir):
         captured["eval"] += 1
         return {
             "task_id": task.id,
@@ -714,10 +723,9 @@ async def test_agent_routes_by_capability_not_task_id(monkeypatch, tmp_path):
             "final": {"total_score": 1.0, "max_score": 1.0, "normalized_score": 1.0},
         }
 
-    monkeypatch.setattr(Agent, "_prepare_task_input", fake_prepare)
-    monkeypatch.setattr(Agent, "_collect_solver_output", fake_bundle)
-    monkeypatch.setattr(Agent, "_get_submission_trace", fake_trace)
-    monkeypatch.setattr(Agent, "_evaluate_submission", fake_evaluate)
+    monkeypatch.setattr(BenchmarkEngine, "_prepare_task_input", fake_prepare)
+    monkeypatch.setattr(BenchmarkEngine, "_collect_solver_output", fake_bundle)
+    monkeypatch.setattr(EvaluationEngine, "evaluate_submission", fake_evaluate)
 
     req = {
         "participants": {"purple_agent": "http://example.com"},
@@ -733,7 +741,8 @@ async def test_agent_routes_by_capability_not_task_id(monkeypatch, tmp_path):
 
     updater = DummyUpdater()
     agent = Agent()
+    agent.benchmark_engine.task_loader = lambda _: task
     await agent.run(new_agent_text_message(json.dumps(req)), updater)
 
     assert updater.rejected is None
-    assert captured == {"prepare": 1, "trace": 0, "bundle": 1, "eval": 1}
+    assert captured == {"prepare": 1, "bundle": 1, "eval": 1}

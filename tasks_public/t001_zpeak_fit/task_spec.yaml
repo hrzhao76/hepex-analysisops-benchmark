@@ -16,14 +16,12 @@ reuse_existing: true
 # --- solver prompt (public) ---
 solver_prompt_path: solver_prompt.md
 input_strategy: download
-solver_response_mode: submission_trace
-evaluation_mode: legacy_trace_contract
+solver_response_mode: submission_bundle_v1
+evaluation_mode: directory_contract_and_private_l1
 
 description: "Build m_mumu and fit around Z peak."
 constraints:
   time_limit_sec: 600
   memory_gb: 8
   allow_network: false
-
-# NOTE: rubric_path / eval_ref_path / judge_prompt_path are intentionally
-# absent from this public contract. They live in specs/zpeak_fit/ (private).
+  response_format: submission_bundle_v1

@@ -22,4 +22,4 @@ submission_contract_path: submission_contract.yaml
 description: "Rediscover the Higgs boson in the diphoton channel using the finetuned L1 package."
 constraints:
   response_format: submission_bundle_v1
-  allow_purple_network: false
+  allow_purple_network: true
