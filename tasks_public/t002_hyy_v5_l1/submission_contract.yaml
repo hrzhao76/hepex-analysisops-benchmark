@@ -50,6 +50,10 @@ schemas:
     - derived_observables
     - primary_observable
     - histogram_definition
+    - input_files_used
+    - input_file_count
+    - selected_events_total
+    - cutflow_summary
     nested_required_fields:
       workflow_stages:
         required_fields:
@@ -91,9 +95,17 @@ schemas:
         - range
         - bin_width
         - uncertainty_model
+      cutflow_summary:
+        required_fields:
+        - input_events
+        - selected_events
     field_types:
       baseline_assumptions_used: array_string
       derived_observables: array_object
       primary_observable: object
       histogram_definition: object
       fit_model_family_used: object
+      input_files_used: array_string
+      input_file_count: integer
+      selected_events_total: integer
+      cutflow_summary: object

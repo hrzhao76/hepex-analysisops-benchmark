@@ -249,8 +249,8 @@ def main():
     purple_img = args.purple_image
 
     if args.local:
-        green_img = "hepex-green-agent-local:v1.1"
-        purple_img = "hepex-purple-agent-local:v1.1"
+        green_img = "hepex-green-agent:local"
+        purple_img = "hepex-purple-agent:local"
 
     if args.llm_provider == "openai":
         judge_provider = "openai"

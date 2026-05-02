@@ -208,7 +208,9 @@ def _score_llm_judge(
     }
     for entry in condition.get("evidence_inputs", []):
         artifact_id = entry.get("artifact_id")
-        if artifact_id:
+        if artifact_id == "interpretation":
+            evidence["interpretation"] = interpretation
+        elif artifact_id:
             evidence[artifact_id] = artifacts.get(artifact_id, {})
 
     judge_spec = {
@@ -217,7 +219,7 @@ def _score_llm_judge(
         "judge_prompt": (
             "You are grading logical consistency for a benchmark submission.\n"
             "Judge rubric:\n{{RUBRIC}}\n"
-            "Submission evidence:\n{{SUBMISSION_TRACE}}\n"
+            "Submission evidence:\n{{SUBMISSION_EVIDENCE}}\n"
             "Return JSON with keys: pass (boolean), explanation (string), notes (array).\n"
         ),
     }
@@ -258,26 +260,37 @@ def rubric_unavailable_report(
     reason: str,
 ) -> Dict[str, Any]:
     dimensions = expected_dimensions(task)
-    dimension_scores = {dimension: 0.0 for dimension in dimensions}
     task_id = getattr(task, "id", "unknown")
     task_type = getattr(task, "type", "unknown")
+    contract_pass = 1.0 if contract_report.get("hard_checks_passed", False) else 0.0
 
     return {
         "task_id": task_id,
         "type": task_type,
-        "status": "rubric_unavailable",
+        "status": "public_ok_hidden_unavailable" if contract_pass else "contract_fail",
         "hard_checks_passed": bool(contract_report.get("hard_checks_passed", False)),
         "contract_report": contract_report,
-        "dimension_scores": dimension_scores,
+        "public_scores": {
+            "contract_pass": contract_pass,
+            "public_structure_score": contract_pass,
+            "public_artifact_score": contract_pass,
+        },
+        "hidden_scores": {
+            "hidden_quality_score": None,
+            "status": "unavailable",
+            "reason": reason,
+        },
+        "score_visibility": "public_only",
+        "dimension_scores": {dimension: None for dimension in dimensions},
         "check_results": [],
         "final": {
-            "total_score": 0.0,
+            "total_score": contract_pass,
             "max_score": 1.0,
-            "normalized_score": 0.0,
+            "normalized_score": contract_pass,
         },
         "issues": list(contract_report.get("issues", [])) + [
             {
-                "severity": "error",
+                "severity": "info",
                 "code": "PRIVATE_RUBRIC_UNAVAILABLE",
                 "message": reason,
             }
@@ -355,6 +368,16 @@ def score_submission(
         "status": "ok" if hard_checks_passed else "contract_fail",
         "hard_checks_passed": hard_checks_passed,
         "contract_report": contract_report,
+        "public_scores": {
+            "contract_pass": 1.0 if hard_checks_passed else 0.0,
+            "public_structure_score": 1.0 if hard_checks_passed else 0.0,
+            "public_artifact_score": 1.0 if hard_checks_passed else 0.0,
+        },
+        "hidden_scores": {
+            "hidden_quality_score": float(total_score),
+            "status": "ok" if hard_checks_passed else "contract_fail",
+        },
+        "score_visibility": "official_with_hidden",
         "dimension_scores": dimension_scores,
         "check_results": check_results,
         "final": {

@@ -1,18 +1,22 @@
 import json
-import pytest
 from pathlib import Path
-import yaml
 
-from a2a.types import Message, Part, TextPart
+import pytest
+from a2a.types import DataPart
+from a2a.utils import new_agent_text_message
 
 from agent import Agent
-from tasks.task_spec import GreenConfig
+
+
+ROOT = Path(__file__).parent.parent
+
 
 class FakeUpdater:
     def __init__(self):
         self.status_updates = []
         self.artifacts = []
         self.rejected = None
+        self.completed = None
 
     async def update_status(self, state, message):
         self.status_updates.append((state, message))
@@ -23,72 +27,57 @@ class FakeUpdater:
     async def reject(self, message):
         self.rejected = message
 
+    async def complete(self, message):
+        self.completed = message
+
 
 @pytest.mark.asyncio
-async def test_agent_runs_two_mock_tasks(monkeypatch, tmp_path):
-    # Patch the symbol as imported inside agent.py:
-    import agent as agent_module
+async def test_agent_runs_public_mock_tasks(monkeypatch, tmp_path):
+    monkeypatch.setenv("GREEN_SECRETS_JSON", "")
 
-    def _fake_download(cfg, task):
-        return {
-            "n_files": 1,
-            "local_paths": ["/tmp/fake.root"],
-            "dataset": getattr(task, "dataset", "data"),
-            "skim": getattr(task, "skim", "skim"),
-        }
-    
-    # We also mock ensure_atlas_open_data_downloaded because that is what agent.py uses now
-    monkeypatch.setattr(agent_module, "ensure_atlas_open_data_downloaded", _fake_download)
+    req = {
+        "participants": {"purple_agent": "http://unused.example.com"},
+        "config": {
+            "data_dir": str(tmp_path / "data"),
+            "task_dirs": [
+                str(ROOT / "tasks_public" / "t001_zpeak_fit"),
+                str(ROOT / "tasks_public" / "t002_hyy_v5_l1"),
+            ],
+            "task_overrides": {
+                "t001_zpeak_fit": {"mode": "mock"},
+                "t002_hyy_v5_l1": {"mode": "mock"},
+            },
+        },
+    }
 
-    # create mock tasks in tmp_path
-    d1 = tmp_path / "task1"
-    d1.mkdir()
-    (d1 / "task_spec.yaml").write_text(yaml.dump({
-        "id": "t1",
-        "type": "zpeak_fit",
-        "mode": "mock",
-        "needs_data": True,
-        "skim": "2muons",
-        "rubric_path": "rubric.yaml"
-    }))
-    (d1 / "rubric.yaml").write_text(yaml.dump({"total": 100, "llm_checks": []}))
-
-    d2 = tmp_path / "task2"
-    d2.mkdir()
-    (d2 / "task_spec.yaml").write_text(yaml.dump({
-        "id": "t2",
-        "type": "hyy_analysis",
-        "mode": "mock",
-        "needs_data": True,
-        "skim": "2gammas",
-        "rubric_path": "rubric.yaml"
-    }))
-    (d2 / "rubric.yaml").write_text(yaml.dump({"total": 100, "llm_checks": []}))
-
-    cfg = GreenConfig(
-        data_dir=str(tmp_path / "data"),
-        release="2025e-13tev-beta",
-        task_dirs=[str(d1), str(d2)],
-    )
-
-    req = {"participants": {}, "config": cfg.model_dump()}
-
-    msg = Message(
-        messageId="test-msg-1",
-        role="user",
-        parts=[Part(root=TextPart(text=json.dumps(req)))]
-    )
     updater = FakeUpdater()
-
-    a = Agent()
-    await a.run(msg, updater)
-
-    if updater.rejected:
-        print("Rejected:", updater.rejected)
+    await Agent().run(new_agent_text_message(json.dumps(req)), updater)
 
     assert updater.rejected is None
-
     names = [name for name, _ in updater.artifacts]
-    assert "Result-t1" in names
-    assert "Result-t2" in names
+    assert "Result-t001_zpeak_fit" in names
+    assert "Result-t002_hyy_v5_l1" in names
     assert "Summary" in names
+    summary_artifact = [artifact for artifact in updater.artifacts if artifact[0] == "Summary"][0]
+    assert len(summary_artifact[1]) == 1
+
+    data_payloads = [
+        part.root.data
+        for _, parts in updater.artifacts
+        for part in parts
+        if isinstance(part.root, DataPart)
+    ]
+    assert {payload.get("task_id") for payload in data_payloads} == {"t001_zpeak_fit", "t002_hyy_v5_l1"}
+    assert all("tasks" not in payload for payload in data_payloads)
+
+    run_dirs = list((tmp_path / "data" / "runs").iterdir())
+    assert len(run_dirs) == 1
+    for task_id in ["t001_zpeak_fit", "t002_hyy_v5_l1"]:
+        task_dir = run_dirs[0] / task_id
+        assert (task_dir / "submission_bundle_raw.json").exists()
+        assert (task_dir / "submission_trace.json").exists()
+        report = json.loads((task_dir / "judge_output.json").read_text(encoding="utf-8"))
+        assert report["status"] == "public_ok_hidden_unavailable"
+        assert report["public_scores"]["contract_pass"] == 1.0
+        assert report["hidden_scores"]["status"] == "unavailable"
+        assert report["final"]["normalized_score"] == 1.0
