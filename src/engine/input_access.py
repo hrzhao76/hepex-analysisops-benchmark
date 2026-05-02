@@ -53,13 +53,12 @@ def resolve_input_access(task: TaskSpec, cfg: GreenConfig) -> Optional[Dict[str,
             continue
         if path.name == Path(input_manifest_path).name:
             continue
-        if path.suffix.lower() != ".root":
-            continue
         files.append(
             {
                 "logical_name": path.name,
                 "path": str(path),
                 "size_bytes": path.stat().st_size,
+                "format": path.suffix.lower().lstrip(".") or "unknown",
             }
         )
 

@@ -1,7 +1,14 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from engine.contract_validator import validate_submission_dir
+from engine.submission_bundle import (
+    SubmissionBundleError,
+    materialize_submission_bundle,
+    parse_submission_bundle,
+)
 from tasks.task_spec import load_task_spec
 from utils.mock_traces import get_mock_bundle
 
@@ -68,3 +75,51 @@ def test_validate_submission_dir_reports_markdown_error(tmp_path):
 
     assert report["status"] == "contract_fail"
     assert any("interpretation.md" in err for err in report["schema_errors"])
+
+
+def test_submission_bundle_allows_declared_optional_image_ref(tmp_path):
+    contract = {
+        "required_outputs": [
+            {"name": "summary", "canonical_filename": "summary.json", "type": "json"},
+        ],
+        "optional_outputs": [
+            {"name": "plot", "canonical_filename": "plot_ref.json", "type": "image_ref"},
+        ],
+        "schemas": {
+            "summary.json": {"required_fields": ["status"]},
+            "plot_ref.json": {"required_fields": ["path", "description"]},
+        },
+    }
+    bundle = {
+        "status": "ok",
+        "artifacts": {
+            "summary.json": {"status": "ok"},
+            "plot_ref.json": {"path": "plots/fit.png", "description": "Fit plot"},
+        },
+    }
+
+    parsed = parse_submission_bundle(bundle, contract)
+    manifest = materialize_submission_bundle(parsed, contract, tmp_path)
+
+    assert (tmp_path / "summary.json").exists()
+    assert (tmp_path / "plot_ref.json").exists()
+    assert [entry["canonical_filename"] for entry in manifest["artifacts"]] == ["summary.json", "plot_ref.json"]
+
+
+def test_submission_bundle_rejects_undeclared_artifact():
+    contract = {
+        "required_outputs": [
+            {"name": "summary", "canonical_filename": "summary.json", "type": "json"},
+        ],
+        "optional_outputs": [],
+        "schemas": {"summary.json": {"required_fields": ["status"]}},
+    }
+    bundle = {
+        "artifacts": {
+            "summary.json": {"status": "ok"},
+            "extra.json": {},
+        }
+    }
+
+    with pytest.raises(SubmissionBundleError, match="unexpected artifact"):
+        parse_submission_bundle(bundle, contract)

@@ -1,0 +1,23 @@
+schema_version: 1
+package_id: t004_hyy_v5_l3
+task_id: t004_hyy_v5_l3
+level: l3
+source: curated
+status: draft
+schema_versions:
+  task_spec: 1
+  submission_contract: 1
+  submission_bundle: 1
+  private_rubric: 1
+  task_package_manifest: 1
+contract_hashes:
+  submission_contract_canonical_sha256: 2cd6f29eb1fac093ba35225b2bbff97322709a60f563421f328e1621e209960a
+files:
+  public:
+    - path: task_spec.yaml
+      sha256: b9333cb778b9edb19f8512caf588b095d0f7a8ab7dd85d185078cededd500745
+    - path: solver_prompt.md
+      sha256: 410f9ebab99d673a17a8ab87b1908ef06011c930a265f58b7d259795761e7b70
+    - path: submission_contract.yaml
+      sha256: aa66c230074ac9a868b065a5f2960bab65c418919a7578d1fb65ebef4fae04d9
+  private: []

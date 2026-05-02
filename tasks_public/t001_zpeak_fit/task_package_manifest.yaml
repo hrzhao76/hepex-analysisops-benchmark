@@ -1,0 +1,23 @@
+schema_version: 1
+package_id: t001_zpeak_fit
+task_id: t001_zpeak_fit
+level: l1
+source: manual
+status: published
+schema_versions:
+  task_spec: 1
+  submission_contract: 1
+  submission_bundle: 1
+  private_rubric: 1
+  task_package_manifest: 1
+contract_hashes:
+  submission_contract_canonical_sha256: 35779e7940d75a9abb1aa5e63eefdb18e9820eed064695e551ff4bc32559e3f6
+files:
+  public:
+    - path: task_spec.yaml
+      sha256: 86c28afb8a4d48422bf5f544bc98dc16938ed81db05a43d0fb1d22f9d874d7e7
+    - path: solver_prompt.md
+      sha256: 88ea8bbe8c655b81af2bb5c404d13f6381d1af2df1f58004117f73288327a2a7
+    - path: submission_contract.yaml
+      sha256: 8d90970b3f1f7e8cdeda10e8ed285f81e482edcbd5506a2b306c68d0446bb7a3
+  private: []

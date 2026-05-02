@@ -28,11 +28,15 @@ TYPE_NAMES = {
     "number": (int, float),
     "object": dict,
     "array_float": list,
+    "array_int": list,
     "array_number": list,
     "array_string": list,
     "array_object": list,
     "array_float_len_2": list,
 }
+
+JSON_ARTIFACT_TYPES = {"json", "table_json", "image_ref"}
+TEXT_ARTIFACT_TYPES = {"markdown", "text"}
 
 
 def _load_json(path: Path) -> Any:
@@ -64,6 +68,8 @@ def _validate_type(value: Any, type_name: str) -> bool:
         return True
     if type_name == "array_float":
         return isinstance(value, list) and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)
+    if type_name == "array_int":
+        return isinstance(value, list) and all(isinstance(v, int) and not isinstance(v, bool) for v in value)
     if type_name == "array_number":
         return isinstance(value, list) and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)
     if type_name == "array_string":
@@ -94,15 +100,36 @@ def _validate_field_types(data: dict[str, Any], field_types: dict[str, str], err
 
 def _validate_constraints(data: dict[str, Any], constraints: dict[str, Any], errors: list[str]) -> None:
     for field, rule in constraints.items():
+        if field in {"array_alignment", "array_lengths"}:
+            for entry in rule or []:
+                fields = entry.get("fields", [])
+                relation = entry.get("relation", entry.get("relationship"))
+                try:
+                    values = [_get_value(data, name) for name in fields]
+                except KeyError:
+                    continue
+                if len(values) < 2 or not all(hasattr(value, "__len__") for value in values):
+                    continue
+                if relation == "same_length" and len(values[0]) != len(values[1]):
+                    errors.append(f"{fields}: expected same_length")
+                if relation == "edges_equals_counts_plus_one" and len(values[0]) != len(values[1]) + 1:
+                    errors.append(f"{fields}: expected edges_equals_counts_plus_one")
+            continue
         try:
             value = _get_value(data, field)
         except KeyError:
             continue
         if isinstance(rule, dict):
             min_length = rule.get("min_length")
+            max_length = rule.get("max_length")
+            gt = rule.get("gt")
             contains_all = rule.get("contains_all")
             if min_length is not None and hasattr(value, "__len__") and len(value) < min_length:
                 errors.append(f"{field}: expected min_length {min_length}")
+            if max_length is not None and hasattr(value, "__len__") and len(value) > max_length:
+                errors.append(f"{field}: expected max_length {max_length}")
+            if gt is not None and not (isinstance(value, (int, float)) and not isinstance(value, bool) and value > gt):
+                errors.append(f"{field}: expected > {gt}")
             if contains_all is not None and isinstance(value, list):
                 missing = [item for item in contains_all if item not in value]
                 if missing:
@@ -137,6 +164,10 @@ def _validate_markdown(path: Path, schema: dict[str, Any], errors: list[str]) ->
         errors.append(f"{path.name}: expected at least {min_characters} characters")
 
 
+def _validate_text(path: Path, schema: dict[str, Any], errors: list[str]) -> None:
+    _validate_markdown(path, schema, errors)
+
+
 def _validate_json_artifact(path: Path, schema: dict[str, Any], errors: list[str]) -> None:
     import json
     try:
@@ -151,6 +182,25 @@ def _validate_json_artifact(path: Path, schema: dict[str, Any], errors: list[str
     _validate_field_types(data, schema.get("field_types", {}), errors)
     _validate_nested_fields(data, schema.get("nested_required_fields", {}), errors)
     _validate_constraints(data, schema.get("constraints", {}), errors)
+
+
+def _contract_outputs(contract: dict[str, Any], *, required_only: bool = False) -> list[dict[str, Any]]:
+    required = [entry for entry in contract.get("required_outputs", []) or [] if isinstance(entry, dict)]
+    if required_only:
+        return required
+    optional = [entry for entry in contract.get("optional_outputs", []) or [] if isinstance(entry, dict)]
+    return required + optional
+
+
+def _validate_artifact(path: Path, artifact_type: str, schema: dict[str, Any], errors: list[str]) -> None:
+    if artifact_type == "markdown":
+        _validate_markdown(path, schema, errors)
+    elif artifact_type == "text":
+        _validate_text(path, schema, errors)
+    elif artifact_type in JSON_ARTIFACT_TYPES:
+        _validate_json_artifact(path, schema, errors)
+    else:
+        errors.append(f"{path.name}: unsupported artifact type {artifact_type!r}")
 
 
 def validate_submission_dir(task: Any, submission_dir: str | Path) -> Dict[str, Any]:
@@ -172,17 +222,24 @@ def validate_submission_dir(task: Any, submission_dir: str | Path) -> Dict[str, 
     missing_files: list[str] = []
     schema_errors: list[str] = []
 
-    for artifact in contract.get("required_outputs", []) or []:
+    for artifact in _contract_outputs(contract, required_only=True):
         filename = artifact["canonical_filename"]
         path = submission_dir / filename
         if not path.exists():
             missing_files.append(filename)
             continue
         schema = contract.get("schemas", {}).get(filename, {})
-        if artifact.get("type") == "markdown":
-            _validate_markdown(path, schema, schema_errors)
-        else:
-            _validate_json_artifact(path, schema, schema_errors)
+        _validate_artifact(path, artifact.get("type", "json"), schema, schema_errors)
+
+    for artifact in contract.get("optional_outputs", []) or []:
+        if not isinstance(artifact, dict):
+            continue
+        filename = artifact["canonical_filename"]
+        path = submission_dir / filename
+        if not path.exists():
+            continue
+        schema = contract.get("schemas", {}).get(filename, {})
+        _validate_artifact(path, artifact.get("type", "json"), schema, schema_errors)
 
     status = "ok" if not missing_files and not schema_errors else "contract_fail"
     return {

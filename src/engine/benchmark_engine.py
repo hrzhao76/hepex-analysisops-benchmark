@@ -23,6 +23,12 @@ from .submission_bundle import (
 )
 
 
+CONTRACT_EVALUATION_MODES = {
+    "directory_contract_and_private_l1",
+    "directory_contract_and_private_rubric_v1",
+}
+
+
 class SolverTransport(Protocol):
     async def request_submission_bundle(self, payload: dict[str, Any]) -> str:
         ...
@@ -119,11 +125,23 @@ class BenchmarkEngine:
 
     @staticmethod
     def _public_task_view(task: TaskSpec) -> dict[str, Any]:
-        return task.model_dump()
+        return task.model_dump(exclude_none=True)
 
     @staticmethod
     def _task_override_payload(override: TaskRuntimeOverride) -> dict[str, Any]:
         return override.model_dump(exclude_none=True)
+
+    @staticmethod
+    def _persisted_eval_request_payload(request: EvalRequest) -> dict[str, Any]:
+        payload = request.model_dump(mode="json", exclude_none=True)
+        config = payload.get("config")
+        if (
+            isinstance(config, dict)
+            and payload.get("solver_backend") is not None
+            and config.get("solver_backend") == payload.get("solver_backend")
+        ):
+            payload.pop("solver_backend", None)
+        return payload
 
     def _apply_task_runtime_override(
         self,
@@ -164,9 +182,9 @@ class BenchmarkEngine:
                 f"Task {task.id} uses solver_response_mode=submission_bundle_v1 but has no submission_contract_path."
             )
 
-        if task.evaluation_mode == "directory_contract_and_private_l1" and not getattr(task, "submission_contract_path", None):
+        if task.evaluation_mode in CONTRACT_EVALUATION_MODES and not getattr(task, "submission_contract_path", None):
             raise SubmissionBundleError(
-                f"Task {task.id} uses evaluation_mode=directory_contract_and_private_l1 but has no submission_contract_path."
+                f"Task {task.id} uses evaluation_mode={task.evaluation_mode} but has no submission_contract_path."
             )
 
     @staticmethod
@@ -259,6 +277,15 @@ class BenchmarkEngine:
         prompt = load_solver_prompt(task) or _builtin_minimal_prompt(task.id, task.type)
         prompt = prompt.replace("{{TASK_ID}}", task.id).replace("{{MAX_FILES}}", str(task.max_files))
         solver_work_dir_str = str(solver_work_dir)
+        constraints = dict(getattr(task, "constraints", {}) or {})
+        constraints.pop("solver_backend", None)
+        constraints.pop("solver_agent", None)
+        constraints.update(
+            {
+                "response_format": "submission_bundle_v1",
+                "allow_purple_network": task.input_strategy == "download",
+            }
+        )
 
         return {
             "role": "task_request",
@@ -282,12 +309,7 @@ class BenchmarkEngine:
                 "output_dir": solver_work_dir_str,
                 "read_only_for_solver": True,
             },
-            "constraints": {
-                **(getattr(task, "constraints", {}) or {}),
-                "response_format": "submission_bundle_v1",
-                "solver_backend": solver_backend,
-                "allow_purple_network": task.input_strategy == "download",
-            },
+            "constraints": constraints,
         }
 
     async def _get_submission_bundle(
@@ -414,8 +436,8 @@ class BenchmarkEngine:
             "score_max": float(len(task_runs)),
         }
         if cfg.persist_payloads:
-            _safe_write_json(run_dir / "eval_request.json", request.model_dump(mode="json"))
-            _safe_write_json(run_dir / "green_config.json", cfg.model_dump(mode="json"))
+            _safe_write_json(run_dir / "eval_request.json", self._persisted_eval_request_payload(request))
+            _safe_write_json(run_dir / "green_config.json", cfg.model_dump(mode="json", exclude_none=True))
 
         for idx, (task, applied_overrides) in enumerate(task_runs, start=1):
             task_eval_dir = self._task_eval_dir(runs_root, run_id, task.id)

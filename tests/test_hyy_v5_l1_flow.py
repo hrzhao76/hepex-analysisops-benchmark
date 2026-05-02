@@ -146,7 +146,7 @@ def canonical_hyy_task(**updates):
         "supports_local_shared_input": True,
         "input_strategy": "shared_manifest",
         "solver_response_mode": "submission_bundle_v1",
-        "evaluation_mode": "directory_contract_and_private_l1",
+        "evaluation_mode": "directory_contract_and_private_rubric_v1",
     }
     canonical.update(updates)
     return task.model_copy(update=canonical)
@@ -157,14 +157,14 @@ def test_public_tasks_use_bundle_directory_contract(task_dir):
     task = load_task_spec(task_dir)
     assert task.input_strategy == "download"
     assert task.solver_response_mode == "submission_bundle_v1"
-    assert task.evaluation_mode == "directory_contract_and_private_l1"
+    assert task.evaluation_mode == "directory_contract_and_private_rubric_v1"
 
 
 def test_task_spec_capability_overrides_for_hyy_task():
     task = canonical_hyy_task()
     assert task.input_strategy == "shared_manifest"
     assert task.solver_response_mode == "submission_bundle_v1"
-    assert task.evaluation_mode == "directory_contract_and_private_l1"
+    assert task.evaluation_mode == "directory_contract_and_private_rubric_v1"
 
 
 class DummyUpdater:

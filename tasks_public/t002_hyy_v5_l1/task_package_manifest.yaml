@@ -1,0 +1,23 @@
+schema_version: 1
+package_id: t002_hyy_v5_l1
+task_id: t002_hyy_v5_l1
+level: l1
+source: manual
+status: published
+schema_versions:
+  task_spec: 1
+  submission_contract: 1
+  submission_bundle: 1
+  private_rubric: 1
+  task_package_manifest: 1
+contract_hashes:
+  submission_contract_canonical_sha256: 2410a3a5eae1d5c60042bba0b41b341fe9830c729bbc0da6715669858381bf71
+files:
+  public:
+    - path: task_spec.yaml
+      sha256: 4250d140b1d8a25d2e0edd23bf2ac42fd6b0467a2026d8f4bf1f6932f3374e52
+    - path: solver_prompt.md
+      sha256: 4c9cc7e7e515d8524f08522ff008feca0de7d7ca642e38aa45034cbff715253c
+    - path: submission_contract.yaml
+      sha256: 3f467afd6921c01d05dbce8f430c0d55af21fca107ce999f54c24b471e5d526a
+  private: []

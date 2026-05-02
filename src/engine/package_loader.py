@@ -5,6 +5,13 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+from .schema_validator import (
+    require_valid,
+    validate_private_rubric_document,
+    validate_submission_contract_document,
+    validate_task_package_manifest_document,
+)
+
 
 def _read_yaml(path: Path) -> Dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -51,14 +58,40 @@ def load_submission_contract(task: Any) -> Dict[str, Any]:
     path = _resolve_path(spec_dir, contract_rel)
     if not path.exists():
         return {}
-    return _read_yaml(path)
+    contract = _read_yaml(path)
+    require_valid(validate_submission_contract_document(contract), label=str(path))
+    return contract
 
 
-def load_private_l1_rubric(task: Any, secret_store: Any) -> Dict[str, Any]:
-    """Load a private L1 rubric from the secret store if available."""
+def load_task_package_manifest(task: Any) -> Dict[str, Any]:
+    """Load and validate an optional task_package_manifest.yaml."""
+    spec_dir = _safe_get(task, "spec_dir")
+    if not spec_dir:
+        return {}
+    path = Path(spec_dir) / "task_package_manifest.yaml"
+    if not path.exists():
+        return {}
+    manifest = _read_yaml(path)
+    require_valid(
+        validate_task_package_manifest_document(manifest, package_dir=Path(spec_dir)),
+        label=str(path),
+    )
+    return manifest
+
+
+def load_private_rubric(task: Any, secret_store: Any) -> Dict[str, Any]:
+    """Load a private executable rubric from the secret store if available."""
     if secret_store is None:
         return {}
     task_id = _safe_get(task, "id")
     contract = load_submission_contract(task)
     contract_hash = secret_store.contract_hash(contract) if contract else None
-    return secret_store.get_task_private_rubric(task_id, public_contract_hash=contract_hash)
+    rubric = secret_store.get_task_private_rubric(task_id, public_contract_hash=contract_hash)
+    if rubric:
+        require_valid(validate_private_rubric_document(rubric), label=f"private rubric for {task_id}")
+    return rubric
+
+
+def load_private_l1_rubric(task: Any, secret_store: Any) -> Dict[str, Any]:
+    """Compatibility alias for older L1-specific callers."""
+    return load_private_rubric(task, secret_store)

@@ -1,0 +1,16 @@
+schema_version: 1
+kind: submission_bundle
+description: Small structured response envelope returned by a Purple agent.
+required_fields:
+  - artifacts
+optional_fields:
+  - status
+  - metadata
+  - errors
+max_bytes: 524288
+artifact_payload_policy:
+  json: object
+  table_json: object
+  image_ref: object
+  markdown: string
+  text: string

@@ -1,0 +1,28 @@
+schema_version: 1
+kind: level_profile
+description: Shared level policy used by generators and benchmark validation.
+levels:
+  l1:
+    hard_constraints:
+      - workflow_stage_identity
+      - key_selection_thresholds
+      - output_protocol
+    rubric_style: baseline_reproduction
+  l2:
+    hard_constraints:
+      - objective
+      - data_scope
+      - output_protocol
+    soft_constraints:
+      - strategy
+      - exact_baseline_thresholds
+    rubric_style: scientifically_valid_strategy
+  l3:
+    hard_constraints:
+      - objective
+      - data_scope
+      - reporting_protocol
+    soft_constraints:
+      - analysis_strategy
+      - implementation_path
+    rubric_style: open_ended_scientific_validity

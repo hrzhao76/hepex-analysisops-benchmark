@@ -1,0 +1,175 @@
+version: 1
+level: l3
+required_outputs:
+  - name: diphoton_mass_spectrum
+    canonical_filename: diphoton_mass_spectrum.json
+    type: json
+    machine_readable: true
+  - name: diphoton_fit_summary
+    canonical_filename: diphoton_fit_summary.json
+    type: json
+    machine_readable: true
+  - name: data_minus_background
+    canonical_filename: data_minus_background.json
+    type: json
+    machine_readable: true
+  - name: interpretation
+    canonical_filename: interpretation.md
+    type: markdown
+    machine_readable: false
+  - name: submission_trace
+    canonical_filename: submission_trace.json
+    type: json
+    machine_readable: true
+optional_outputs:
+  - name: diphoton_spectrum_fit_plot
+    canonical_filename: diphoton_spectrum_fit_plot.json
+    type: image_ref
+    machine_readable: true
+  - name: data_minus_background_plot
+    canonical_filename: data_minus_background_plot.json
+    type: image_ref
+    machine_readable: true
+schemas:
+  diphoton_mass_spectrum.json:
+    required_fields:
+      - observable_name
+      - bin_edges_gev
+      - bin_counts
+      - bin_uncertainties
+    field_types:
+      observable_name: string
+      bin_edges_gev: array_float
+      bin_counts: array_int
+      bin_uncertainties: array_number
+    constraints:
+      array_alignment:
+        - fields:
+            - bin_edges_gev
+            - bin_counts
+          relation: edges_equals_counts_plus_one
+        - fields:
+            - bin_counts
+            - bin_uncertainties
+          relation: same_length
+  diphoton_fit_summary.json:
+    required_fields:
+      - method_family
+      - fit_range_gev
+      - signal_model_family
+      - background_model_family
+      - signal_peak_gev
+      - signal_region_gev
+    field_types:
+      method_family: string
+      fit_range_gev: array_float_len_2
+      signal_model_family: string
+      background_model_family: string
+      signal_peak_gev: float
+      signal_region_gev: array_float_len_2
+      gaussian_mean_gev: float
+      gaussian_sigma_gev: float
+      polynomial_coefficients: array_number
+  data_minus_background.json:
+    required_fields:
+      - residual_definition
+      - bin_edges_gev
+      - residual_counts
+    field_types:
+      residual_definition: string
+      bin_edges_gev: array_float
+      residual_counts: array_number
+      residual_uncertainties: array_number
+    constraints:
+      array_alignment:
+        - fields:
+            - bin_edges_gev
+            - residual_counts
+          relation: edges_equals_counts_plus_one
+        - fields:
+            - residual_counts
+            - residual_uncertainties
+          relation: same_length
+  interpretation.md:
+    required_sections: []
+    constraints:
+      non_empty: true
+      min_characters: 80
+  submission_trace.json:
+    required_fields:
+      - workflow_stages
+      - data_scope
+      - scientific_decisions
+      - observable_constructed
+      - inference_strategy
+      - validation_actions
+      - result_summary
+      - output_files_generated
+    field_types:
+      workflow_stages: array_object
+      data_scope: object
+      scientific_decisions: array_string
+      observable_constructed: object
+      selection_strategy: object
+      inference_strategy: object
+      validation_actions: array_string
+      result_summary: object
+      output_files_generated: array_string
+    nested_required_fields:
+      workflow_stages:
+        required_fields:
+          - stage_label
+          - family
+          - status
+        field_types:
+          stage_label: string
+          family: string
+          status: string
+      observable_constructed:
+        required_fields:
+          - name
+          - inputs
+          - construction
+        field_types:
+          name: string
+          inputs: array_string
+          construction: string
+      inference_strategy:
+        required_fields:
+          - method_family
+        field_types:
+          method_family: string
+      result_summary:
+        required_fields:
+          - conclusion
+        field_types:
+          conclusion: string
+    constraints:
+      workflow_stages:
+        min_length: 5
+      scientific_decisions:
+        min_length: 1
+      validation_actions:
+        min_length: 1
+      output_files_generated:
+        min_length: 5
+        contains_all:
+          - diphoton_mass_spectrum.json
+          - diphoton_fit_summary.json
+          - data_minus_background.json
+          - interpretation.md
+          - submission_trace.json
+  diphoton_spectrum_fit_plot.json:
+    required_fields:
+      - path
+      - media_type
+    field_types:
+      path: string
+      media_type: string
+  data_minus_background_plot.json:
+    required_fields:
+      - path
+      - media_type
+    field_types:
+      path: string
+      media_type: string

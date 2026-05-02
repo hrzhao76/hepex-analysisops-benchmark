@@ -19,7 +19,7 @@ def test_public_tasks_use_bundle_directory_contract():
     for task_dir in public_task_dirs():
         task = load_task_spec(task_dir)
         assert task.solver_response_mode == "submission_bundle_v1"
-        assert task.evaluation_mode == "directory_contract_and_private_l1"
+        assert task.evaluation_mode == "directory_contract_and_private_rubric_v1"
         assert (task_dir / "solver_prompt.md").exists()
         assert (task_dir / "submission_contract.yaml").exists()
 
