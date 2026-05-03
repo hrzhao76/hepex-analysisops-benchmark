@@ -114,7 +114,7 @@ def test_build_green_secrets_json_includes_multiple_tasks(tmp_path):
     assert yaml.safe_load(decoded)["checks"]["execution"][0]["id"] == "required_trace"
 
 
-def test_requested_sources_defaults_to_l1_l2_and_l3():
+def test_requested_sources_defaults_to_hyy_l1_l2_l3_and_hzz_l1_l2():
     script = load_export_script()
 
     sources = script.requested_sources(Namespace(task_dir=None, private_rubric=None))
@@ -123,6 +123,8 @@ def test_requested_sources_defaults_to_l1_l2_and_l3():
         "t002_hyy_v5_l1",
         "t003_hyy_v5_l2",
         "t004_hyy_v5_l3",
+        "t005_hzz4l_l1",
+        "t006_hzz4l_l2",
     ]
 
 
@@ -144,3 +146,60 @@ def test_requested_sources_infers_l3_private_rubric_for_l3_single_task():
     assert len(sources) == 1
     assert sources[0].task_dir.name == "t004_hyy_v5_l3"
     assert sources[0].private_rubric_path.name == "hyy_v5_l3_private_rubric.yaml"
+
+
+def test_requested_sources_infers_hzz_l1_private_rubric_for_hzz_single_task():
+    script = load_export_script()
+
+    sources = script.requested_sources(Namespace(task_dir=script.DEFAULT_HZZ_L1_TASK_DIR, private_rubric=None))
+
+    assert len(sources) == 1
+    assert sources[0].task_dir.name == "t005_hzz4l_l1"
+    assert sources[0].private_rubric_path.name == "hzz4l_l1_private_rubric.yaml"
+
+
+def test_requested_sources_infers_hzz_l2_private_rubric_for_hzz_single_task():
+    script = load_export_script()
+
+    sources = script.requested_sources(Namespace(task_dir=script.DEFAULT_HZZ_L2_TASK_DIR, private_rubric=None))
+
+    assert len(sources) == 1
+    assert sources[0].task_dir.name == "t006_hzz4l_l2"
+    assert sources[0].private_rubric_path.name == "hzz4l_l2_private_rubric.yaml"
+
+
+def test_resolve_private_rubric_keeps_existing_cache_when_fallback_changes(tmp_path):
+    script = load_export_script()
+    cached = tmp_path / "cached.yaml"
+    fallback = tmp_path / "fallback.yaml"
+    cached.write_text("version: 1\nsource: cached\n", encoding="utf-8")
+    fallback.write_text("version: 1\nsource: fallback\n", encoding="utf-8")
+
+    resolved = script.resolve_private_rubric_path(
+        script.TaskSecretSource(
+            task_dir=tmp_path,
+            private_rubric_path=cached,
+            fallback_private_rubric_path=fallback,
+        )
+    )
+
+    assert resolved == cached
+    assert cached.read_text(encoding="utf-8") == "version: 1\nsource: cached\n"
+
+
+def test_resolve_private_rubric_seeds_missing_cache_from_fallback(tmp_path):
+    script = load_export_script()
+    cached = tmp_path / "cached.yaml"
+    fallback = tmp_path / "fallback.yaml"
+    fallback.write_text("version: 1\nsource: fallback\n", encoding="utf-8")
+
+    resolved = script.resolve_private_rubric_path(
+        script.TaskSecretSource(
+            task_dir=tmp_path,
+            private_rubric_path=cached,
+            fallback_private_rubric_path=fallback,
+        )
+    )
+
+    assert resolved == cached
+    assert cached.read_text(encoding="utf-8") == "version: 1\nsource: fallback\n"

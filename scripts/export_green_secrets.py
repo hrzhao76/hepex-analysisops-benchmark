@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build GREEN_SECRETS_JSON from private rubrics and write it to .env files.
 
-By default this exports the Hyy v5 L1, L2, and L3 private rubrics together. The
-rubric source files are cached under private_rubrics/, which is ignored by git.
-Pass --task-dir/--private-rubric to preserve the older single-task behavior.
+By default this exports the Hyy v5 L1/L2/L3 and HZZ4l L1/L2 private rubrics
+together. The rubric source files are cached under private_rubrics/, which is
+ignored by git. Pass --task-dir/--private-rubric to preserve the older
+single-task behavior.
 """
 
 from __future__ import annotations
@@ -34,9 +35,13 @@ PRIVATE_RUBRIC_CACHE_DIR = REPO_ROOT / "private_rubrics"
 DEFAULT_L1_TASK_DIR = REPO_ROOT / "tasks_public" / "t002_hyy_v5_l1"
 DEFAULT_L2_TASK_DIR = REPO_ROOT / "tasks_public" / "t003_hyy_v5_l2"
 DEFAULT_L3_TASK_DIR = REPO_ROOT / "tasks_public" / "t004_hyy_v5_l3"
+DEFAULT_HZZ_L1_TASK_DIR = REPO_ROOT / "tasks_public" / "t005_hzz4l_l1"
+DEFAULT_HZZ_L2_TASK_DIR = REPO_ROOT / "tasks_public" / "t006_hzz4l_l2"
 DEFAULT_L1_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hyy_v5_l1_private_rubric.yaml"
 DEFAULT_L2_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hyy_v5_l2_private_rubric.yaml"
 DEFAULT_L3_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hyy_v5_l3_private_rubric.yaml"
+DEFAULT_HZZ_L1_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hzz4l_l1_private_rubric.yaml"
+DEFAULT_HZZ_L2_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hzz4l_l2_private_rubric.yaml"
 DEV_L1_PRIVATE_RUBRIC = (
     REPO_ROOT.parent
     / "hepex-analysisops-dev"
@@ -62,6 +67,24 @@ DEV_L3_PRIVATE_RUBRIC = (
     / "outputs"
     / "auto_full_v2_20260501T200248"
     / "l3_package"
+    / "private_rubric.yaml"
+)
+DEV_HZZ_L1_PRIVATE_RUBRIC = (
+    REPO_ROOT.parent
+    / "hepex-analysisops-dev"
+    / "benchmark"
+    / "outputs"
+    / "HZZ_packages_v1_20260502T200248"
+    / "l1_package"
+    / "private_rubric.yaml"
+)
+DEV_HZZ_L2_PRIVATE_RUBRIC = (
+    REPO_ROOT.parent
+    / "hepex-analysisops-dev"
+    / "benchmark"
+    / "outputs"
+    / "HZZ_packages_v3_20260502T231500"
+    / "l2_package"
     / "private_rubric.yaml"
 )
 DEFAULT_ENV_FILES = [
@@ -92,6 +115,16 @@ DEFAULT_TASK_SOURCES = [
         task_dir=DEFAULT_L3_TASK_DIR,
         private_rubric_path=DEFAULT_L3_PRIVATE_RUBRIC,
         fallback_private_rubric_path=DEV_L3_PRIVATE_RUBRIC,
+    ),
+    TaskSecretSource(
+        task_dir=DEFAULT_HZZ_L1_TASK_DIR,
+        private_rubric_path=DEFAULT_HZZ_L1_PRIVATE_RUBRIC,
+        fallback_private_rubric_path=DEV_HZZ_L1_PRIVATE_RUBRIC,
+    ),
+    TaskSecretSource(
+        task_dir=DEFAULT_HZZ_L2_TASK_DIR,
+        private_rubric_path=DEFAULT_HZZ_L2_PRIVATE_RUBRIC,
+        fallback_private_rubric_path=DEV_HZZ_L2_PRIVATE_RUBRIC,
     ),
 ]
 
@@ -141,13 +174,14 @@ def _copy_if_needed(src: Path, dst: Path) -> None:
 
 
 def resolve_private_rubric_path(source: TaskSecretSource) -> Path:
-    if source.fallback_private_rubric_path and source.fallback_private_rubric_path.exists():
-        _copy_if_needed(source.fallback_private_rubric_path, source.private_rubric_path)
-
     if source.private_rubric_path.exists():
         return source.private_rubric_path
 
     fallback = source.fallback_private_rubric_path
+    if fallback and fallback.exists():
+        _copy_if_needed(fallback, source.private_rubric_path)
+        return source.private_rubric_path
+
     fallback_text = f" fallback={fallback}" if fallback else ""
     raise SystemExit(f"Private rubric file not found: {source.private_rubric_path}.{fallback_text}")
 
@@ -207,6 +241,12 @@ def requested_sources(args: argparse.Namespace) -> list[TaskSecretSource]:
     elif task_dir == DEFAULT_L3_TASK_DIR.resolve() or task_dir.name == DEFAULT_L3_TASK_DIR.name:
         private_rubric_path = DEFAULT_L3_PRIVATE_RUBRIC.resolve()
         fallback_private_rubric_path = DEV_L3_PRIVATE_RUBRIC
+    elif task_dir == DEFAULT_HZZ_L1_TASK_DIR.resolve() or task_dir.name == DEFAULT_HZZ_L1_TASK_DIR.name:
+        private_rubric_path = DEFAULT_HZZ_L1_PRIVATE_RUBRIC.resolve()
+        fallback_private_rubric_path = DEV_HZZ_L1_PRIVATE_RUBRIC
+    elif task_dir == DEFAULT_HZZ_L2_TASK_DIR.resolve() or task_dir.name == DEFAULT_HZZ_L2_TASK_DIR.name:
+        private_rubric_path = DEFAULT_HZZ_L2_PRIVATE_RUBRIC.resolve()
+        fallback_private_rubric_path = DEV_HZZ_L2_PRIVATE_RUBRIC
     else:
         private_rubric_path = DEFAULT_L1_PRIVATE_RUBRIC.resolve()
         fallback_private_rubric_path = DEV_L1_PRIVATE_RUBRIC

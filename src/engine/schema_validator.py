@@ -29,6 +29,7 @@ CONDITION_KEYS = {
     "required_outputs",
     "required_files",
     "files_nonempty",
+    "file_nonempty",
     "object_definition",
     "selection_cuts",
     "selection_constraints",
@@ -41,12 +42,16 @@ CONDITION_KEYS = {
     "artifact_value_in_range",
     "artifact_field_constraints",
     "artifact_histogram_properties",
+    "artifact_numeric_relationships",
+    "artifact_window_consistency",
+    "artifact_series_usable",
     "required_stages",
     "ordered_stage_pairs",
     "dependencies",
     "trace_required_fields",
     "trace_stage_families_present",
     "trace_stage_family_order",
+    "trace_data_assembly_semantics",
     "trace_data_scope_coverage",
     "data_scope_coverage",
     "workflow_evidence_present",
@@ -55,6 +60,7 @@ CONDITION_KEYS = {
     "trace_observable_construction",
     "observable_match",
     "scientifically_valid_selection_evidence",
+    "mc_weighting_strategy",
     "trace_mass_dependent_selection",
     "inference_method_acceptable",
     "scientifically_valid_method_any_of",
@@ -64,7 +70,10 @@ CONDITION_KEYS = {
     "residual_signal_region_check",
     "cross_artifact_region_consistency",
     "model_data_coherence",
+    "histogram_excess_in_region",
+    "histogram_peak_location",
     "validation_evidence_any",
+    "hzz_sample_manifest_coverage",
     "validation_targets_signal_inference",
     "interpretation_consistency",
     "concise_scientific_interpretation",
@@ -137,6 +146,42 @@ def validate_task_spec_document(data: Any) -> list[str]:
         issues.append(f"evaluation_mode must be one of {sorted(EVALUATION_MODES)}")
     if "input_requirements" in data and not isinstance(data["input_requirements"], dict):
         issues.append("input_requirements must be a mapping")
+    input_requirements = data.get("input_requirements", {})
+    if isinstance(input_requirements, dict):
+        if "samples" in input_requirements:
+            samples = input_requirements["samples"]
+            if not isinstance(samples, list):
+                issues.append("input_requirements.samples must be a list")
+            else:
+                for idx, sample in enumerate(samples):
+                    label = f"input_requirements.samples[{idx}]"
+                    if not isinstance(sample, dict):
+                        issues.append(f"{label} must be a mapping")
+                        continue
+                    if not isinstance(sample.get("name"), str) or not sample["name"].strip():
+                        issues.append(f"{label}.name is required")
+                    if sample.get("role") not in {"data", "background", "signal"}:
+                        issues.append(f"{label}.role must be data, background, or signal")
+                    if not isinstance(sample.get("dids"), list) or not sample["dids"]:
+                        issues.append(f"{label}.dids must be a non-empty list")
+        if "sample_groups" in input_requirements:
+            sample_groups = input_requirements["sample_groups"]
+            if not isinstance(sample_groups, list):
+                issues.append("input_requirements.sample_groups must be a list")
+            else:
+                for idx, group in enumerate(sample_groups):
+                    label = f"input_requirements.sample_groups[{idx}]"
+                    if not isinstance(group, dict):
+                        issues.append(f"{label} must be a mapping")
+                        continue
+                    if not isinstance(group.get("id"), str) or not group["id"].strip():
+                        issues.append(f"{label}.id is required")
+                    if not isinstance(group.get("label"), str) or not group["label"].strip():
+                        issues.append(f"{label}.label is required")
+                    if group.get("role") not in {"data", "background", "signal"}:
+                        issues.append(f"{label}.role must be data, background, or signal")
+                    if not isinstance(group.get("dids"), list) or not group["dids"]:
+                        issues.append(f"{label}.dids must be a non-empty list")
 
     if "scientific_core" in data and not isinstance(data["scientific_core"], dict):
         issues.append("scientific_core must be a mapping when present")
@@ -287,6 +332,60 @@ def validate_input_manifest_document(data: Any) -> list[str]:
             issues.append(f"files[{idx}].logical_name is required")
         if not isinstance(entry.get("path"), str):
             issues.append(f"files[{idx}].path is required")
+        if "samples" in data:
+            if not isinstance(entry.get("sample_id"), str):
+                issues.append(f"files[{idx}].sample_id is required for multi-sample manifests")
+            if not isinstance(entry.get("sample_name"), str):
+                issues.append(f"files[{idx}].sample_name is required for multi-sample manifests")
+            if entry.get("sample_role") not in {"data", "background", "signal"}:
+                issues.append(f"files[{idx}].sample_role must be data, background, or signal")
+            if "did" not in entry:
+                issues.append(f"files[{idx}].did is required for multi-sample manifests")
+            if not isinstance(entry.get("is_data"), bool):
+                issues.append(f"files[{idx}].is_data is required for multi-sample manifests")
+            if not isinstance(entry.get("is_mc"), bool):
+                issues.append(f"files[{idx}].is_mc is required for multi-sample manifests")
+            if not isinstance(entry.get("weight_policy"), str):
+                issues.append(f"files[{idx}].weight_policy is required for multi-sample manifests")
+        if "sample_groups" in data:
+            if not isinstance(entry.get("sample_group_id"), str):
+                issues.append(f"files[{idx}].sample_group_id is required for legacy multi-sample manifests")
+    samples = data.get("samples")
+    if samples is not None:
+        if not isinstance(samples, list):
+            issues.append("samples must be a list")
+        else:
+            for idx, sample in enumerate(samples):
+                label = f"samples[{idx}]"
+                if not isinstance(sample, dict):
+                    issues.append(f"{label} must be a mapping")
+                    continue
+                if not isinstance(sample.get("id"), str):
+                    issues.append(f"{label}.id is required")
+                if not isinstance(sample.get("name"), str):
+                    issues.append(f"{label}.name is required")
+                if sample.get("role") not in {"data", "background", "signal"}:
+                    issues.append(f"{label}.role must be data, background, or signal")
+                if not isinstance(sample.get("dids"), list):
+                    issues.append(f"{label}.dids must be a list")
+    sample_groups = data.get("sample_groups")
+    if sample_groups is not None:
+        if not isinstance(sample_groups, list):
+            issues.append("sample_groups must be a list")
+        else:
+            for idx, group in enumerate(sample_groups):
+                label = f"sample_groups[{idx}]"
+                if not isinstance(group, dict):
+                    issues.append(f"{label} must be a mapping")
+                    continue
+                if not isinstance(group.get("id"), str):
+                    issues.append(f"{label}.id is required")
+                if not isinstance(group.get("label"), str):
+                    issues.append(f"{label}.label is required")
+                if group.get("role") not in {"data", "background", "signal"}:
+                    issues.append(f"{label}.role must be data, background, or signal")
+                if not isinstance(group.get("dids"), list):
+                    issues.append(f"{label}.dids must be a list")
     return issues
 
 

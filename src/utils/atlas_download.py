@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -154,6 +155,79 @@ def _ensure_one_file(
     )
 
 
+def _strip_root_prefix(entry: str) -> str:
+    return entry.split("::", 1)[1] if "::" in entry else entry
+
+
+def _sample_id(name: str) -> str:
+    text = name.lower()
+    if text == "data":
+        return "data"
+    if "signal" in text:
+        return "signal_mh125"
+    if "zz" in text:
+        return "background_zzstar"
+    if "background" in text:
+        return "background_z_ttbar_ttb_vvv"
+    normalized = re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+    return normalized or "sample"
+
+
+def _sample_role(name: str, sample: dict[str, Any]) -> str:
+    if isinstance(sample.get("role"), str) and sample["role"].strip():
+        return sample["role"].strip()
+    text = name.lower()
+    if text == "data":
+        return "data"
+    if "signal" in text:
+        return "signal"
+    return "background"
+
+
+def _extract_did(url: str, sample: dict[str, Any]) -> str | int | None:
+    dids = sample.get("dids") or []
+    if dids == ["data"] or dids == ("data",):
+        return "data"
+    match = re.search(r"_mc_(\d+)\.", os.path.basename(url))
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _entry_list(sample: Any) -> list[str]:
+    if isinstance(sample, dict):
+        entries = sample.get("list", [])
+    else:
+        entries = sample
+    if not isinstance(entries, list):
+        return []
+    return [_strip_root_prefix(str(entry)) for entry in entries]
+
+
+def _ensure_sample_files(
+    urls: list[str],
+    output_dir: str,
+    *,
+    workers: int,
+    verbose: bool,
+) -> list[DownloadResult]:
+    results: list[DownloadResult] = []
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        futs = [ex.submit(_ensure_one_file, url, output_dir, verbose=verbose) for url in urls]
+        for fut in as_completed(futs):
+            r = fut.result()
+            results.append(r)
+            if verbose:
+                if r.ok and r.skipped:
+                    print(f"[ok][skip] {os.path.basename(r.local_path)} ({r.local_size} bytes)")
+                elif r.ok:
+                    print(f"[ok]      {os.path.basename(r.local_path)} ({r.local_size} bytes)")
+                else:
+                    print(f"[fail]    {os.path.basename(r.local_path)} err={r.error}")
+    url_to_result = {result.url: result for result in results}
+    return [url_to_result[url] for url in urls if url in url_to_result]
+
+
 # -----------------------------
 # High-level: get URL list via atlasopenmagic + multithread ensure
 # -----------------------------
@@ -230,3 +304,151 @@ def ensure_atlas_open_data_downloaded(
         "results": [r.__dict__ for r in results],  # JSON-friendly
         "raw_urls": urls,
     }
+
+
+def ensure_atlas_open_data_samples_downloaded(
+    *,
+    samples: list[dict[str, Any]],
+    skim: str = "exactly4lep",
+    release: str = "2025e-13tev-beta",
+    protocol: str = "https",
+    output_dir: str = "./atlas_data",
+    max_files_per_sample: int = 0,
+    max_files_per_group: int | None = None,
+    workers: int = 6,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    """Ensure ATLAS Open Data samples are present locally.
+
+    This preserves HZZ-style sample roles: Data, backgrounds, and signal.
+    ``max_files_per_sample`` caps each sample independently; 0 means no cap.
+    """
+    if max_files_per_group is not None:
+        max_files_per_sample = max_files_per_group
+
+    atom.set_release(release)
+    os.makedirs(output_dir, exist_ok=True)
+
+    defs: dict[str, dict[str, Any]] = {}
+    normalized_samples: list[dict[str, Any]] = []
+    for raw_sample in samples:
+        if not isinstance(raw_sample, dict):
+            continue
+        name = str(raw_sample.get("name") or raw_sample.get("label") or raw_sample.get("id") or "").strip()
+        if not name:
+            continue
+        dids = raw_sample.get("dids", [])
+        group_def = {"dids": dids}
+        if raw_sample.get("color"):
+            group_def["color"] = raw_sample["color"]
+        defs[name] = group_def
+        normalized = dict(raw_sample)
+        normalized.setdefault("id", _sample_id(name))
+        normalized.setdefault("name", name)
+        normalized.setdefault("role", _sample_role(name, normalized))
+        normalized_samples.append(normalized)
+
+    dataset_entries = atom.build_dataset(defs, skim=skim, protocol=protocol, cache=True)
+
+    manifest_samples: list[dict[str, Any]] = []
+    manifest_files: list[dict[str, Any]] = []
+    all_results: list[dict[str, Any]] = []
+    raw_urls: list[str] = []
+    n_requested = 0
+    n_ok = 0
+    n_fail = 0
+
+    for sample in normalized_samples:
+        sample_id = str(sample["id"])
+        name = str(sample["name"])
+        role = str(sample["role"])
+        cap = int(sample.get("max_files_per_sample", sample.get("max_files_per_group", max_files_per_sample)) or 0)
+        urls = sorted(_entry_list(dataset_entries.get(name, {})))
+        if cap > 0:
+            urls = urls[:cap]
+
+        sample_dir = os.path.join(output_dir, sample_id)
+        os.makedirs(sample_dir, exist_ok=True)
+        if verbose:
+            print(f"[ensure-sample] {name} role={role} files={len(urls)} output_dir={os.path.abspath(sample_dir)}")
+
+        ordered_results = _ensure_sample_files(urls, sample_dir, workers=workers, verbose=verbose)
+        raw_urls.extend(urls)
+        n_requested += len(urls)
+        group_ok = sum(1 for result in ordered_results if result.ok)
+        group_fail = sum(1 for result in ordered_results if not result.ok)
+        n_ok += group_ok
+        n_fail += group_fail
+        all_results.extend({**result.__dict__, "sample_id": sample_id, "sample_name": name} for result in ordered_results)
+
+        manifest_samples.append(
+            {
+                "id": sample_id,
+                "name": name,
+                "role": role,
+                "dids": sample.get("dids", []),
+                "color": sample.get("color"),
+                "max_files_per_sample": cap,
+                "n_requested": len(urls),
+                "n_ok": group_ok,
+                "n_fail": group_fail,
+                "output_dir": os.path.abspath(sample_dir),
+            }
+        )
+        for result in ordered_results:
+            if not result.ok:
+                continue
+            did = _extract_did(result.url, sample)
+            is_data = role == "data"
+            entry = {
+                "logical_name": os.path.basename(result.local_path),
+                "path": result.local_path,
+                "size_bytes": result.local_size,
+                "format": "root",
+                "source": result.url,
+                "sample_id": sample_id,
+                "sample_name": name,
+                "sample_role": role,
+                "did": did,
+                "is_data": is_data,
+                "is_mc": not is_data,
+                "weight_policy": "unweighted" if is_data else "lumi_normalized_efficiency_weighted_mc",
+                "metadata": {"dids": sample.get("dids", [])},
+            }
+            manifest_files.append(entry)
+
+    input_manifest = {
+        "release": release,
+        "skim": skim,
+        "protocol": protocol,
+        "samples": manifest_samples,
+        "files": manifest_files,
+        "read_only_for_solver": True,
+        "manifest_kind": "multi_sample",
+    }
+
+    return {
+        "release": release,
+        "skim": skim,
+        "protocol": protocol,
+        "output_dir": os.path.abspath(output_dir),
+        "n_requested": n_requested,
+        "n_ok": n_ok,
+        "n_fail": n_fail,
+        "n_samples": len(manifest_samples),
+        "samples": manifest_samples,
+        "local_paths": [entry["path"] for entry in manifest_files],
+        "results": all_results,
+        "raw_urls": raw_urls,
+        "input_manifest": input_manifest,
+    }
+
+
+def ensure_atlas_open_data_sample_groups_downloaded(
+    *,
+    sample_groups: list[dict[str, Any]],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Backward-compatible alias for older callers that used sample_groups."""
+
+    return ensure_atlas_open_data_samples_downloaded(samples=sample_groups, **kwargs)

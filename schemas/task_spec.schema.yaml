@@ -24,3 +24,8 @@ compatibility:
     - protocol
     - max_files
   generic_data_field: input_requirements
+  canonical_input_requirements:
+    - skim
+    - samples
+  legacy_input_aliases:
+    - sample_groups

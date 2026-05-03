@@ -12,4 +12,17 @@ optional_file_entry_fields:
   - format
   - source
   - checksum
+  - sample_id
+  - sample_name
+  - sample_group_id
+  - sample_group_label
+  - sample_role
+  - did
+  - is_data
+  - is_mc
+  - weight_policy
   - metadata
+optional_top_level_fields:
+  - samples
+  - sample_groups
+  - manifest_kind
