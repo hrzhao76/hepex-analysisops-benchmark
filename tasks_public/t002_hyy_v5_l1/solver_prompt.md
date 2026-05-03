@@ -1,10 +1,12 @@
 # 1. Objective
 
-Rediscover the Higgs boson in the diphoton channel by reconstructing the diphoton invariant-mass spectrum (m_γγ) and testing for a localized Higgs-like excess near 125 GeV.
+Perform an L1 diphoton analysis by reconstructing the diphoton invariant-mass spectrum (m_γγ) and testing for a localized Higgs-like excess near 125 GeV.
+
+Do not assume the excess must be observed. The correct answer may be a limited-statistics or inconclusive result if the runtime gives only a small input subset.
 
 ---
 
-# 2. Top-level Workflow (Strict Execution)
+# 2. Required Workflow (Strict L1 Execution)
 
 Reproduce the baseline workflow exactly in this order:
 
@@ -16,7 +18,7 @@ Reproduce the baseline workflow exactly in this order:
 6. spectrum_fitting  
 7. signal_interpretation  
 
-This is a test about if you can strictly and faithfully follow user's instruction, so Do NOT reorder, skip, or redesign stages.
+This is a test about if you can strictly and faithfully follow user's instruction, so DO NOT reorder, skip, or redesign stages.
 
 ---
 
@@ -28,7 +30,20 @@ Use ATLAS Open Data:
 - Sample: GamGam
 - Mode: diphoton_skim
 
-Combine all specified 2015–2016 periods into a single spectrum.
+Critical unit convention:
+- The benchmark input branches `photon_pt`, `photon_e`, and `photon_ptcone20`
+  are already expressed in GeV-scale units for this task.
+- Use these branch values directly when applying the 50 GeV / 30 GeV cuts,
+  constructing `m_yy`, computing isolation ratios, and filling the 100-160 GeV
+  histogram.
+- Do NOT divide these branch values by 1000 and do NOT perform a MeV-to-GeV
+  conversion unless the runtime data explicitly documents different units.
+
+Use every input file made available by the runtime request. If the request
+limits the run with `max_files` or an input manifest subset, analyze that subset
+and state the subset honestly in `submission_trace.json`. Only claim that all
+2015–2016 periods were combined when the provided input files actually cover
+those periods.
 
 ---
 
@@ -58,6 +73,16 @@ Apply ALL cuts exactly (cut_id and criteria):
 
 Do NOT modify cut_id, thresholds or logic.
 
+Important numerical safety requirement:
+- Compute `m_yy` first.
+- Construct `m_yy` from the same unscaled branch units used for `photon_pt` and
+  `photon_e`; do not mix scaled and unscaled quantities.
+- Apply an explicit finite, nonzero mass mask (`m_yy > 0` and finite) before
+  calculating any `photon_pt / m_yy` ratio.
+- Do not divide by zero and do not keep events with non-finite ratios.
+- If a realistic GamGam subset yields zero selected events after all cuts,
+  inspect unit handling before returning the final bundle.
+
 ---
 
 # 5. Observable and Histogram
@@ -81,13 +106,19 @@ Perform a fit with:
 
 Do NOT change model family or configuration.
 
+Only treat the fit as successful if it converges on the histogram produced from
+the selected events. If there are too few selected events, the fit is unstable,
+or the residuals do not support a localized positive excess near 125 GeV, say so
+honestly in `interpretation.md` and `submission_trace.json`. Do NOT fabricate a
+peak or force a discovery narrative to satisfy the expected range.
+
 ---
 
 # 7. Required Outputs
 
 Your final output will be reveiwed by the benchmark agent program, thus any wrong output format will cause parseing error.
-Do NOT skip any fields.
 Your final output shold be in JSON format.
+DO NOT skip any fields.
 
 Exaxmple template:
 {
@@ -176,6 +207,14 @@ Exaxmple template:
 All outputs MUST be derived from actual computation.
 
 Do NOT fabricate results or skip required steps.
+Do NOT return placeholder or protocol-validation artifacts.
+Do NOT hardcode the final peak position without reading the input ROOT file(s).
+Record enough trace information to show which input files, branches, cuts, histogram, and fit settings were used.
+Record that energy-like branch values were used directly without a `/1000`
+conversion when that is true for the runtime input.
+
+If any stage fails, return `status: "error"` in the bundle with an explanation
+rather than returning protocol-valid placeholder artifacts.
 
 ---
 
@@ -183,16 +222,27 @@ Do NOT fabricate results or skip required steps.
 
 Write a short conclusion:
 
-- whether a Higgs-like excess is observed
-- approximate peak position
+- whether the analyzed subset supports, does not support, or is inconclusive for a Higgs-like excess
+- approximate peak position only if the fit is meaningful
 
 The conclusion must be consistent with the fit and residual results.
+For `max_files=1` or any partial manifest, use limited-statistics language and
+do not claim a full ATLAS-period rediscovery.
+
 
 ---
 
 # 10. Runtime Input Rules
 
+If `request.data.work_dir` or `request.data.output_dir` is provided, use that
+directory as the analysis working directory for generated scripts, logs, plots,
+and intermediate files. Do not write task outputs into `$HOME/output` directly
+unless no working directory is provided.
+
 If `shared_input_dir` is provided, treat it as read-only input.
 Do not modify dataset files in place.
 Return outputs through `submission_bundle_v1` as small structured artifacts only.
+
+If `input_manifest_path` is provided, read it first and use only the ROOT files listed there.
+If no shared input manifest is provided, use the data access information in the request, but still produce the same submission bundle contract.
 
