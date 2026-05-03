@@ -5,6 +5,7 @@ data/
 output/
 .DS_Store
 private*
+tests/test_rubric_scorer_private.py
 shared_input
 docker-compose.yml
 
