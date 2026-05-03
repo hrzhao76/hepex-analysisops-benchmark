@@ -1,0 +1,28 @@
+schema_version: 1
+package_id: t007_hzz4l_l3
+task_id: t007_hzz4l_l3
+level: l3
+source: curated
+status: draft
+schema_versions:
+  task_spec: 1
+  submission_contract: 1
+  private_rubric: 1
+  submission_bundle: 1
+  task_package_manifest: 1
+generation:
+  generator: benchmark/scripts/generate_benchmark_suite.py
+  model: gpt-5.4
+  input_python: /Users/ranriver/Projects/AgentBeats/Refs/HzzAnalysis.py
+  source_package: /Users/ranriver/Projects/AgentBeats/hepex-analysisops-dev/benchmark/outputs/HZZ_packages_v3_20260502T231500/l3_package
+contract_hashes:
+  submission_contract_canonical_sha256: 2e90a36e902cc93cb038ad8a0dc97d844ccf0c26ff4de119d3c67eea9c75a690
+files:
+  public:
+    - path: task_spec.yaml
+      sha256: 949ced94632f7df2a14e4aa26f6abfbd75fe510586fb3fd44de8c6f827f52d7e
+    - path: solver_prompt.md
+      sha256: d2cfe768c1094d3e1858ac680be36eae5fbc7af7ffd2639540e7fec78fc4ecc7
+    - path: submission_contract.yaml
+      sha256: 08271d540de0e0f85fb0664ee04e250c583f222c2a998a96999db8fd6558f684
+  private: []

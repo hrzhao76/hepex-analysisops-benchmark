@@ -1,0 +1,48 @@
+id: t007_hzz4l_l3
+type: hzz4l_l3
+level: l3
+mode: call_white
+
+needs_data: true
+release: 2025e-13tev-beta
+dataset: data
+skim: exactly4lep
+max_files: 5
+
+requires_large_input_data: true
+supports_scenario_shared_input: true
+supports_local_shared_input: true
+input_strategy: shared_manifest
+solver_response_mode: submission_bundle_v1
+evaluation_mode: directory_contract_and_private_rubric_v1
+
+solver_prompt_path: solver_prompt.md
+submission_contract_path: submission_contract.yaml
+
+description: "Open-scientific-discovery HZZ4l L3 task: design a defensible H -> ZZ* -> 4l signal-search strategy and report evidence for or against a localized excess near 125 GeV."
+input_requirements:
+  source: ATLAS Open Data
+  release: 2025e-13tev-beta
+  dataset: data
+  skim: exactly4lep
+  tree: analysis
+  max_files_semantics: per_sample
+  samples:
+    - name: Data
+      role: data
+      dids: ["data"]
+    - name: 'Background $Z,t\bar{t},t\bar{t}+V,VVV$'
+      role: background
+      dids: [410470, 410155, 410218, 410219, 412043, 364243, 364242, 364246, 364248, 700320, 700321, 700322, 700323, 700324, 700325]
+      color: "#6b59d3"
+    - name: 'Background $ZZ^{*}$'
+      role: background
+      dids: [700600]
+      color: "#ff0000"
+    - name: 'Signal ($m_H$ = 125 GeV)'
+      role: signal
+      dids: [345060, 346228, 346310, 346311, 346312, 346340, 346341, 346342]
+      color: "#00cdff"
+constraints:
+  response_format: submission_bundle_v1
+  allow_purple_network: false
