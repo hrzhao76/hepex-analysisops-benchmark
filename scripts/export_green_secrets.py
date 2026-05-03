@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Build GREEN_SECRETS_JSON from private rubrics and write it to .env files.
 
-By default this exports the Hyy v5 L1/L2/L3 and HZZ4l L1/L2 private rubrics
-together. The rubric source files are cached under private_rubrics/, which is
-ignored by git. Pass --task-dir/--private-rubric to preserve the older
-single-task behavior.
+By default this exports the Hyy v5 L1/L2/L3 and HZZ4l L1/L2/L3 private rubrics
+together. Use --suite hyy or --suite hzz to export only one task family. The
+rubric source files are cached under private_rubrics/, which is ignored by git.
+Pass --task-dir/--private-rubric to preserve the older single-task behavior.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import gzip
 import json
 import shutil
 import sys
@@ -37,11 +38,13 @@ DEFAULT_L2_TASK_DIR = REPO_ROOT / "tasks_public" / "t003_hyy_v5_l2"
 DEFAULT_L3_TASK_DIR = REPO_ROOT / "tasks_public" / "t004_hyy_v5_l3"
 DEFAULT_HZZ_L1_TASK_DIR = REPO_ROOT / "tasks_public" / "t005_hzz4l_l1"
 DEFAULT_HZZ_L2_TASK_DIR = REPO_ROOT / "tasks_public" / "t006_hzz4l_l2"
+DEFAULT_HZZ_L3_TASK_DIR = REPO_ROOT / "tasks_public" / "t007_hzz4l_l3"
 DEFAULT_L1_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hyy_v5_l1_private_rubric.yaml"
 DEFAULT_L2_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hyy_v5_l2_private_rubric.yaml"
 DEFAULT_L3_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hyy_v5_l3_private_rubric.yaml"
 DEFAULT_HZZ_L1_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hzz4l_l1_private_rubric.yaml"
 DEFAULT_HZZ_L2_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hzz4l_l2_private_rubric.yaml"
+DEFAULT_HZZ_L3_PRIVATE_RUBRIC = PRIVATE_RUBRIC_CACHE_DIR / "hzz4l_l3_private_rubric.yaml"
 DEV_L1_PRIVATE_RUBRIC = (
     REPO_ROOT.parent
     / "hepex-analysisops-dev"
@@ -87,6 +90,15 @@ DEV_HZZ_L2_PRIVATE_RUBRIC = (
     / "l2_package"
     / "private_rubric.yaml"
 )
+DEV_HZZ_L3_PRIVATE_RUBRIC = (
+    REPO_ROOT.parent
+    / "hepex-analysisops-dev"
+    / "benchmark"
+    / "outputs"
+    / "HZZ_packages_v3_20260502T231500"
+    / "l3_package"
+    / "private_rubric.yaml"
+)
 DEFAULT_ENV_FILES = [
     REPO_ROOT / ".env",
     REPO_ROOT.parent / "hepex-analysisops-leaderboard" / ".env",
@@ -100,7 +112,7 @@ class TaskSecretSource:
     fallback_private_rubric_path: Optional[Path] = None
 
 
-DEFAULT_TASK_SOURCES = [
+HYY_TASK_SOURCES = [
     TaskSecretSource(
         task_dir=DEFAULT_L1_TASK_DIR,
         private_rubric_path=DEFAULT_L1_PRIVATE_RUBRIC,
@@ -116,6 +128,9 @@ DEFAULT_TASK_SOURCES = [
         private_rubric_path=DEFAULT_L3_PRIVATE_RUBRIC,
         fallback_private_rubric_path=DEV_L3_PRIVATE_RUBRIC,
     ),
+]
+
+HZZ_TASK_SOURCES = [
     TaskSecretSource(
         task_dir=DEFAULT_HZZ_L1_TASK_DIR,
         private_rubric_path=DEFAULT_HZZ_L1_PRIVATE_RUBRIC,
@@ -126,7 +141,14 @@ DEFAULT_TASK_SOURCES = [
         private_rubric_path=DEFAULT_HZZ_L2_PRIVATE_RUBRIC,
         fallback_private_rubric_path=DEV_HZZ_L2_PRIVATE_RUBRIC,
     ),
+    TaskSecretSource(
+        task_dir=DEFAULT_HZZ_L3_TASK_DIR,
+        private_rubric_path=DEFAULT_HZZ_L3_PRIVATE_RUBRIC,
+        fallback_private_rubric_path=DEV_HZZ_L3_PRIVATE_RUBRIC,
+    ),
 ]
+
+DEFAULT_TASK_SOURCES = HYY_TASK_SOURCES + HZZ_TASK_SOURCES
 
 
 def parse_env_pair(raw: str) -> tuple[str, str]:
@@ -186,7 +208,18 @@ def resolve_private_rubric_path(source: TaskSecretSource) -> Path:
     raise SystemExit(f"Private rubric file not found: {source.private_rubric_path}.{fallback_text}")
 
 
-def build_task_secret_entry(source: TaskSecretSource) -> tuple[str, dict[str, str], str]:
+def encode_private_rubric(rubric_text: str, *, encoding: str) -> dict[str, str]:
+    rubric_bytes = rubric_text.encode("utf-8")
+    if encoding == "gzip":
+        return {
+            "private_rubric_yaml_gz_b64": base64.b64encode(gzip.compress(rubric_bytes, mtime=0)).decode("utf-8")
+        }
+    if encoding == "plain":
+        return {"private_rubric_yaml_b64": base64.b64encode(rubric_bytes).decode("utf-8")}
+    raise ValueError(f"Unsupported private rubric encoding: {encoding}")
+
+
+def build_task_secret_entry(source: TaskSecretSource, *, encoding: str) -> tuple[str, dict[str, str], str]:
     task = load_task_spec(source.task_dir)
     contract = load_submission_contract(task)
     contract_hash = SecretStore("").contract_hash(contract)
@@ -198,10 +231,9 @@ def build_task_secret_entry(source: TaskSecretSource) -> tuple[str, dict[str, st
         raise SystemExit(f"Private rubric must be a YAML mapping: {private_rubric_path}")
     require_valid(validate_private_rubric_document(rubric_obj), label=f"private rubric {private_rubric_path}")
 
-    rubric_b64 = base64.b64encode(rubric_text.encode("utf-8")).decode("utf-8")
     entry = {
         "public_contract_sha256": contract_hash,
-        "private_rubric_yaml_b64": rubric_b64,
+        **encode_private_rubric(rubric_text, encoding=encoding),
     }
     return task.id, entry, contract_hash
 
@@ -210,11 +242,12 @@ def build_green_secrets_json(
     *,
     sources: Iterable[TaskSecretSource],
     judge_env: Iterable[tuple[str, str]],
+    encoding: str = "gzip",
 ) -> tuple[str, list[tuple[str, str]]]:
     task_entries: dict[str, dict[str, str]] = {}
     summaries: list[tuple[str, str]] = []
     for source in sources:
-        task_id, entry, contract_hash = build_task_secret_entry(source)
+        task_id, entry, contract_hash = build_task_secret_entry(source, encoding=encoding)
         if task_id in task_entries:
             raise SystemExit(f"Duplicate task id in secret export: {task_id}")
         task_entries[task_id] = entry
@@ -229,8 +262,15 @@ def build_green_secrets_json(
 
 
 def requested_sources(args: argparse.Namespace) -> list[TaskSecretSource]:
+    suite = getattr(args, "suite", "all")
     if args.task_dir is None and args.private_rubric is None:
+        if suite == "hyy":
+            return HYY_TASK_SOURCES
+        if suite == "hzz":
+            return HZZ_TASK_SOURCES
         return DEFAULT_TASK_SOURCES
+    if suite != "all":
+        raise SystemExit("--suite cannot be combined with --task-dir or --private-rubric")
     task_dir = (args.task_dir or DEFAULT_L1_TASK_DIR).resolve()
     if args.private_rubric:
         private_rubric_path = args.private_rubric.resolve()
@@ -247,6 +287,9 @@ def requested_sources(args: argparse.Namespace) -> list[TaskSecretSource]:
     elif task_dir == DEFAULT_HZZ_L2_TASK_DIR.resolve() or task_dir.name == DEFAULT_HZZ_L2_TASK_DIR.name:
         private_rubric_path = DEFAULT_HZZ_L2_PRIVATE_RUBRIC.resolve()
         fallback_private_rubric_path = DEV_HZZ_L2_PRIVATE_RUBRIC
+    elif task_dir == DEFAULT_HZZ_L3_TASK_DIR.resolve() or task_dir.name == DEFAULT_HZZ_L3_TASK_DIR.name:
+        private_rubric_path = DEFAULT_HZZ_L3_PRIVATE_RUBRIC.resolve()
+        fallback_private_rubric_path = DEV_HZZ_L3_PRIVATE_RUBRIC
     else:
         private_rubric_path = DEFAULT_L1_PRIVATE_RUBRIC.resolve()
         fallback_private_rubric_path = DEV_L1_PRIVATE_RUBRIC
@@ -265,7 +308,7 @@ def main() -> None:
         "--task-dir",
         type=Path,
         default=None,
-        help="Export a single task from this task directory. Omit to export default L1+L2+L3 tasks.",
+        help="Export a single task from this task directory. Omit to export the selected suite.",
     )
     parser.add_argument(
         "--private-rubric",
@@ -287,6 +330,18 @@ def main() -> None:
         metavar="KEY=VALUE",
         help="Optional judge env entry to embed in GREEN_SECRETS_JSON.",
     )
+    parser.add_argument(
+        "--suite",
+        choices=("all", "hyy", "hzz"),
+        default="all",
+        help="Task family to export when --task-dir is omitted. Defaults to all.",
+    )
+    parser.add_argument(
+        "--encoding",
+        choices=("gzip", "plain"),
+        default="gzip",
+        help="Private rubric encoding inside GREEN_SECRETS_JSON. gzip is much smaller; plain is legacy-compatible.",
+    )
     parser.add_argument("--stdout", action="store_true", help="Print the generated value to stdout.")
     parser.add_argument("--dry-run", action="store_true", help="Validate inputs without writing .env files.")
     args = parser.parse_args()
@@ -294,6 +349,7 @@ def main() -> None:
     secret_json, summaries = build_green_secrets_json(
         sources=requested_sources(args),
         judge_env=args.judge_env,
+        encoding=args.encoding,
     )
 
     env_files = args.env_file or DEFAULT_ENV_FILES
