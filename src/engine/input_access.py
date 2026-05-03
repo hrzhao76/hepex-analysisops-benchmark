@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -9,6 +10,15 @@ from utils import _safe_write_json
 
 class InputAccessError(RuntimeError):
     pass
+
+
+def _task_samples(task: TaskSpec) -> list[dict[str, Any]]:
+    requirements = getattr(task, "input_requirements", {}) or {}
+    samples = requirements.get("samples")
+    if isinstance(samples, list):
+        return samples
+    legacy_groups = requirements.get("sample_groups", [])
+    return legacy_groups if isinstance(legacy_groups, list) else []
 
 
 def _template_context(task: TaskSpec) -> Dict[str, Any]:
@@ -80,6 +90,21 @@ def resolve_input_access(task: TaskSpec, cfg: GreenConfig) -> Optional[Dict[str,
     mode, shared_dir, manifest_path = resolve_shared_input_paths(task, cfg)
     if not shared_dir.exists() or not shared_dir.is_dir():
         raise InputAccessError(f"Shared input directory does not exist: {shared_dir}")
+
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise InputAccessError(f"Input manifest is not valid JSON: {manifest_path}") from exc
+        if isinstance(manifest, dict) and (
+            isinstance(manifest.get("samples"), list) or isinstance(manifest.get("sample_groups"), list)
+        ):
+            return manifest
+
+    if _task_samples(task):
+        raise InputAccessError(
+            f"Task {task.id} declares multiple samples, but no multi-sample input manifest exists at {manifest_path}."
+        )
 
     files = []
     for path in sorted(shared_dir.iterdir()):

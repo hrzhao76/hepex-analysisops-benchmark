@@ -16,19 +16,74 @@ LEVEL_DIMENSIONS: Dict[str, List[str]] = {
 }
 
 FAMILY_KEYWORDS: Dict[str, tuple[str, ...]] = {
-    "data_access": ("data", "load", "read", "input", "access", "download"),
-    "data_loading": ("data", "load", "read", "input", "access", "download"),
-    "object_or_event_selection": ("select", "selection", "cut", "filter", "photon", "event"),
-    "selection": ("select", "selection", "cut", "filter", "photon", "event"),
-    "observable_construction": ("observable", "mass", "construct", "invariant", "m_yy", "mgg"),
-    "mass_construction_or_signal_proxy": ("observable", "mass", "construct", "invariant", "m_yy", "mgg", "proxy"),
-    "spectrum_or_summary_construction": ("histogram", "spectrum", "bin", "summary"),
-    "spectrum_construction": ("histogram", "spectrum", "bin"),
-    "inference_or_signal_localization": ("fit", "inference", "signal", "local", "background", "likelihood"),
-    "signal_extraction": ("fit", "inference", "signal", "extract", "likelihood"),
-    "residual_or_background_subtraction": ("residual", "background", "subtract"),
-    "interpretation": ("interpret", "conclusion", "claim", "report"),
-    "validation": ("validate", "validation", "robust", "stability", "cross", "scan"),
+    "data_access": ("data", "load", "read", "input", "access", "download", "manifest", "sample", "file"),
+    "data_loading": ("data", "load", "read", "input", "access", "download", "manifest", "sample", "file"),
+    "event_weighting": (
+        "weight",
+        "weighted",
+        "weighting",
+        "normalization",
+        "normalisation",
+        "normalised",
+        "normalized",
+        "luminosity",
+        "mcweight",
+        "scale factor",
+        "scalefactor",
+        "xsec",
+        "kfac",
+        "filteff",
+        "sum_of_weights",
+    ),
+    "mc_weighting": (
+        "weight",
+        "weighted",
+        "weighting",
+        "normalization",
+        "normalisation",
+        "normalised",
+        "normalized",
+        "luminosity",
+        "mcweight",
+        "scale factor",
+        "scalefactor",
+        "xsec",
+        "kfac",
+        "filteff",
+        "sum_of_weights",
+    ),
+    "object_or_event_selection": ("select", "selection", "cut", "filter", "photon", "lepton", "candidate", "quality", "isolation"),
+    "selection": ("select", "selection", "cut", "filter", "photon", "lepton", "candidate", "quality", "isolation"),
+    "observable_construction": ("observable", "mass", "construct", "invariant", "m_yy", "mgg", "m4l", "m_4l", "reconstruct"),
+    "mass_construction_or_signal_proxy": ("observable", "mass", "construct", "invariant", "m_yy", "mgg", "m4l", "m_4l", "proxy", "reconstruct"),
+    "spectrum_or_summary_construction": ("histogram", "spectrum", "bin", "binned", "summary", "counts", "yield"),
+    "spectrum_construction": ("histogram", "spectrum", "bin", "binned", "counts", "yield"),
+    "inference_or_signal_localization": (
+        "fit",
+        "inference",
+        "signal",
+        "local",
+        "localized",
+        "background model",
+        "background comparison",
+        "likelihood",
+        "counting",
+        "window",
+        "excess",
+        "assessment",
+        "comparison",
+    ),
+    "signal_extraction": ("fit", "inference", "signal", "extract", "likelihood", "counting", "window", "excess"),
+    "residual_or_background_subtraction": (
+        "residual",
+        "subtract",
+        "minus",
+        "data_minus_background",
+        "background subtract",
+        "background-subtracted",
+    ),
+    "interpretation": ("interpret", "interpretation", "conclusion", "claim", "report", "result"),
+    "validation": ("validate", "validation", "robust", "stability", "cross", "scan", "sideband", "alternative", "check", "sanity"),
 }
 
 FAMILY_ALIASES: Dict[str, str] = {
@@ -41,6 +96,9 @@ FAMILY_ALIASES: Dict[str, str] = {
     "histogram_construction": "spectrum_or_summary_construction",
     "signal_extraction": "inference_or_signal_localization",
     "mass_construction_or_signal_proxy": "observable_construction",
+    "event_weighting": "event_weighting",
+    "mc_weighting": "event_weighting",
+    "mc_event_weighting": "event_weighting",
 }
 
 FIELD_ALIASES: Dict[str, tuple[str, ...]] = {
@@ -68,7 +126,7 @@ FIELD_ALIASES: Dict[str, tuple[str, ...]] = {
     "bin_centers": ("bin_centers", "bin_centers_GeV", "bin_centers_gev", "mass_centers_gev"),
     "residual_counts": ("residual_counts", "data_minus_background", "residuals"),
     "bin_edges": ("bin_edges", "bin_edges_GeV", "bin_edges_gev"),
-    "bin_counts": ("bin_counts", "counts"),
+    "bin_counts": ("bin_counts", "counts", "data_counts", "background_counts", "signal_counts"),
     "bin_uncertainties": ("bin_uncertainties", "count_uncertainties"),
 }
 
@@ -248,36 +306,172 @@ def _match_subset(actual: Any, expected: Any) -> bool:
     return _match_value(actual, expected)
 
 
+def _normalize_operator(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    return {"in_set": "in", "is_in": "in"}.get(normalized, normalized)
+
+
+def _compact_expr(value: str) -> str:
+    return re.sub(r"[^a-z0-9_\[\]:+*/<>=!]+", "", value.lower())
+
+
+def _selection_variable_aliases(value: Any) -> set[str]:
+    if not isinstance(value, str):
+        return set()
+
+    compact = _compact_expr(value)
+    aliases = {compact}
+    canonical_tokens = (
+        "event_trigger_pass",
+        "trigger_matched_lepton_count",
+        "typed_quality_lepton_count",
+        "sum_lep_type",
+        "total_lepton_charge",
+        "leading_lep_pt",
+        "sub_leading_lep_pt",
+        "third_leading_lep_pt",
+    )
+    for token in canonical_tokens:
+        if _compact_expr(token) in compact:
+            aliases.add(token)
+
+    if "trige" in compact and "trigm" in compact:
+        aliases.add("event_trigger_pass")
+    if "lep_istrigmatched" in compact and ("sum" in compact or "count" in compact):
+        aliases.add("trigger_matched_lepton_count")
+    if "lep_pt[0]" in compact:
+        aliases.add("leading_lep_pt")
+    if "lep_pt[1]" in compact:
+        aliases.add("sub_leading_lep_pt")
+    if "lep_pt[2]" in compact:
+        aliases.add("third_leading_lep_pt")
+    if "lep_type[0:4]" in compact or all(f"lep_type[{idx}]" in compact for idx in range(4)):
+        aliases.add("sum_lep_type")
+    if "lep_charge[0:4]" in compact or all(f"lep_charge[{idx}]" in compact for idx in range(4)):
+        aliases.add("total_lepton_charge")
+
+    has_explicit_typed_quality = all(
+        token in compact
+        for token in ("lep_type==13", "lep_ismediumid", "lep_islooseiso", "lep_type==11", "lep_islooseid")
+    )
+    has_descriptive_typed_quality = all(token in compact for token in ("mu", "medium", "looseiso", "looseid"))
+    if has_explicit_typed_quality or has_descriptive_typed_quality:
+        aliases.add("typed_quality_lepton_count")
+
+    return aliases
+
+
+def _selection_variable_matches(actual_value: Any, expected_value: Any) -> bool:
+    if _match_subset(actual_value, expected_value):
+        return True
+    actual_aliases = _selection_variable_aliases(actual_value)
+    expected_aliases = _selection_variable_aliases(expected_value)
+    return bool(actual_aliases and expected_aliases and actual_aliases.intersection(expected_aliases))
+
+
+def _selection_field_matches(actual: dict[str, Any], expected_key: str, expected_value: Any) -> bool:
+    if expected_key.endswith("_any_of"):
+        actual_key = expected_key.removesuffix("_any_of")
+        options = expected_value if isinstance(expected_value, list) else [expected_value]
+        return any(_selection_field_matches(actual, actual_key, option) for option in options)
+
+    actual_value = actual.get(expected_key)
+    if expected_key == "operator":
+        return _normalize_operator(actual_value) == _normalize_operator(expected_value)
+    if expected_key == "variable":
+        return _selection_variable_matches(actual_value, expected_value)
+    return _match_subset(actual_value, expected_value)
+
+
 def _contains_all_tokens(text: str, tokens: list[str]) -> bool:
     normalized = text.lower()
     return all(token.lower() in normalized for token in tokens)
 
 
-def _stage_family_for_text(text: str) -> str | None:
+def _normalize_family(value: str) -> str:
+    return FAMILY_ALIASES.get(value, value)
+
+
+def _stage_families_for_text(text: str) -> list[str]:
     normalized = text.lower()
+    compact = _compact_expr(normalized)
+    families: list[str] = []
     for family, keywords in FAMILY_KEYWORDS.items():
-        if any(keyword in normalized for keyword in keywords):
-            return family
-    return None
+        if any(keyword in normalized or _compact_expr(keyword) in compact for keyword in keywords):
+            normalized_family = _normalize_family(family)
+            if normalized_family not in families:
+                families.append(normalized_family)
+    return families
+
+
+def _explicit_stage_families(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [_normalize_family(value)]
+    if isinstance(value, list):
+        families: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                family = _normalize_family(item)
+                if family not in families:
+                    families.append(family)
+        return families
+    return []
+
+
+def _trace_family_observations(trace: dict[str, Any], *, include_supplemental: bool = True) -> list[tuple[str, float, str]]:
+    observations: list[tuple[str, float, str]] = []
+    for index, entry in enumerate(_stage_entries(trace)):
+        text = " ".join(
+            str(entry.get(key, ""))
+            for key in ("stage_id", "stage_label", "role", "description", "family", "stage_family")
+        )
+        families = _explicit_stage_families(entry.get("family") or entry.get("stage_family"))
+        for family in _stage_families_for_text(text):
+            if family not in families:
+                families.append(family)
+        for family in families:
+            observations.append((family, float(index), "workflow_stages"))
+
+    if not include_supplemental:
+        return observations
+
+    supplemental_fields = (
+        "scientific_decisions",
+        "selection_strategy",
+        "cuts_applied",
+        "observable_constructed",
+        "primary_observable",
+        "histogram_definition",
+        "inference_strategy",
+        "fit_model_family_used",
+        "validation_checks",
+        "validation_actions",
+        "output_files_generated",
+    )
+    base_index = float(len(_stage_entries(trace)))
+    for offset, field in enumerate(supplemental_fields):
+        value = trace.get(field)
+        if value is None:
+            continue
+        text = f"{field} {_coerce_text(value)}"
+        for family in _stage_families_for_text(text):
+            observations.append((family, base_index + (offset + 1) / 100.0, field))
+
+    return observations
 
 
 def _stage_families(trace: dict[str, Any]) -> list[str]:
     families: list[str] = []
-    for entry in _stage_entries(trace):
-        text = " ".join(
-            str(entry.get(key, ""))
-            for key in ("stage_id", "stage_label", "role", "description", "family")
-        )
-        explicit = entry.get("family") or entry.get("stage_family")
-        family = str(explicit) if explicit else _stage_family_for_text(text)
-        if family:
-            families.append(family)
+    for family, _, _ in _trace_family_observations(trace):
+        families.append(family)
     return families
 
 
 def _family_matches(actual: str, required: str) -> bool:
-    actual_norm = FAMILY_ALIASES.get(actual, actual)
-    required_norm = FAMILY_ALIASES.get(required, required)
+    actual_norm = _normalize_family(actual)
+    required_norm = _normalize_family(required)
     return actual_norm == required_norm
 
 
@@ -378,21 +572,82 @@ def _score_stage_families_present(spec: dict[str, Any], trace: dict[str, Any]) -
     required = spec.get("required_families", [])
     families = _stage_families(trace)
     missing = [family for family in required if not _has_family(families, family)]
-    return (1.0 if not missing else 0.0, {"families": families, "missing": missing})
+    matched = len(required) - len(missing)
+    fraction = 1.0 if not required else matched / len(required)
+    minimum = spec.get("minimum_pass_fraction")
+    if minimum is not None:
+        achieved = fraction if spec.get("partial_credit") else (1.0 if fraction >= float(minimum) else 0.0)
+    else:
+        achieved = 1.0 if not missing else 0.0
+    return (
+        achieved,
+        {
+            "families": families,
+            "missing": missing,
+            "matched": matched,
+            "required": len(required),
+            "match_fraction": fraction,
+        },
+    )
 
 
 def _score_stage_family_order(spec: dict[str, Any], trace: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
+    observations = _trace_family_observations(trace, include_supplemental=False)
+    families = [family for family, _, _ in observations]
+    family_positions = {
+        required: [position for actual, position, _ in observations if _family_matches(actual, required)]
+        for required in set(spec.get("ordered_families", []))
+    }
+    ignore_missing = bool(spec.get("ignore_missing_families"))
+    allow_same_stage = bool(spec.get("allow_same_stage", True))
+    partial_orders = spec.get("required_partial_orders")
+    if isinstance(partial_orders, list):
+        failed: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for entry in partial_orders:
+            if not isinstance(entry, dict):
+                continue
+            before = entry.get("before") or entry.get("earlier")
+            after = entry.get("after") or entry.get("later")
+            if not isinstance(before, str) or not isinstance(after, str):
+                continue
+            before_positions = [position for actual, position, _ in observations if _family_matches(actual, before)]
+            after_positions = [position for actual, position, _ in observations if _family_matches(actual, after)]
+            if not before_positions or not after_positions:
+                if ignore_missing:
+                    skipped.append({"before": before, "after": after, "reason": "missing_family"})
+                    continue
+                failed.append({"before": before, "after": after})
+                continue
+            ordered = min(before_positions) <= max(after_positions) if allow_same_stage else min(before_positions) < max(after_positions)
+            if not ordered:
+                failed.append({"before": before, "after": after})
+        if spec.get("minimum_pass_fraction") is not None:
+            total = len([entry for entry in partial_orders if isinstance(entry, dict)])
+            passed = total - len(failed) - (0 if ignore_missing else len(skipped))
+            fraction = 1.0 if total == 0 else passed / total
+            achieved = fraction if spec.get("partial_credit") else (1.0 if fraction >= float(spec["minimum_pass_fraction"]) else 0.0)
+        else:
+            achieved = 1.0 if not failed else 0.0
+        return (
+            achieved,
+            {
+                "families": families,
+                "failed_orders": failed,
+                "skipped_orders": skipped,
+            },
+        )
+
     ordered = spec.get("ordered_families", [])
-    families = _stage_families(trace)
     positions: list[int] = []
     missing: list[str] = []
     for required in ordered:
-        match_positions = [idx for idx, actual in enumerate(families) if _family_matches(actual, required)]
+        match_positions = family_positions.get(required, [])
         if not match_positions:
             missing.append(required)
         else:
             positions.append(match_positions[0])
-    ok = not missing and positions == sorted(positions)
+    ok = (not missing or ignore_missing) and positions == sorted(positions)
     return (1.0 if ok else 0.0, {"families": families, "missing": missing, "positions": positions})
 
 
@@ -404,6 +659,73 @@ def _score_required_trace_fields(spec: dict[str, Any], trace: dict[str, Any]) ->
 
 def _score_selection_evidence(spec: dict[str, Any], trace: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
     text = _coerce_text(trace).lower()
+    compact = _compact_expr(text)
+    default_component_groups = {
+        "trigger": ("trigger", "trig"),
+        "trigger_matching": ("trigger matched", "trigger_matched", "istrigmatched", "triggermatched", "trigger-compatible"),
+        "kinematic": ("pt", "p_t", "threshold", "kinematic", "momentum", "leading", "subleading", "ordered"),
+        "object_quality": ("quality", "identification", "id", "tight", "looseid", "mediumid", "electron", "muon", "photon"),
+        "isolation": ("isolation", "iso", "ptcone", "looseiso"),
+        "topology": ("4e", "2e2mu", "4mu", "flavour", "flavor", "channel", "quadruplet", "four lepton", "diphoton", "two photon", "exactly4lep"),
+        "charge": ("charge", "zero", "neutral", "total_charge", "net charge", "==0"),
+        "multiplicity": ("at least", "minimum", "multiplicity", "count", "two", "four", ">=2", ">= 2", "exactly4lep"),
+        "detector_region": ("eta", "veto", "transition", "crack", "barrel", "endcap", "calorimeter"),
+    }
+    required_groups = spec.get("required_component_groups")
+    if isinstance(required_groups, list) and required_groups:
+        custom_groups = spec.get("component_groups", {})
+        group_tokens: dict[str, tuple[str, ...]] = dict(default_component_groups)
+        if isinstance(custom_groups, dict):
+            for name, tokens in custom_groups.items():
+                if isinstance(name, str):
+                    values = tokens if isinstance(tokens, list) else [tokens]
+                    group_tokens[name] = tuple(str(value) for value in values)
+        present: list[str] = []
+        missing: list[str] = []
+        for group in [str(value) for value in required_groups]:
+            tokens = group_tokens.get(group, (group.replace("_", " "),))
+            found = any(token.lower() in text or _compact_expr(token) in compact for token in tokens)
+            if found:
+                present.append(group)
+            else:
+                missing.append(group)
+        minimum = int(spec.get("minimum_groups", len(required_groups)))
+        achieved = 1.0 if len(present) >= minimum else 0.0
+        if spec.get("partial_credit"):
+            achieved = len(present) / len(required_groups)
+        return (
+            achieved,
+            {
+                "present": present,
+                "missing": missing,
+                "minimum_groups": minimum,
+            },
+        )
+
+    required_components = spec.get("required_components")
+    if isinstance(required_components, list) and required_components:
+        component_tokens = {
+            "trigger_requirement": ("trigger", "trig"),
+            "at_least_one_trigger_matched_lepton": ("trigger_matched", "istrigmatched", "triggermatched", "trigger match", "trigger-compatible"),
+            "hierarchical_pt_requirement_on_first_three_leptons": ("lep_pt[0]", "lep_pt[1]", "lep_pt[2]", "leading", "subleading", "third", "ordered pt", "p_t threshold"),
+            "flavour_dependent_identification": ("looseid", "mediumid", "tightid", "tight id", "tight-id", "identification", "flavour", "flavor", "electron", "muon"),
+            "loose_isolation": ("looseiso", "isolation", "iso"),
+            "allowed_four_lepton_flavour_channels": ("4e", "2e2mu", "4mu", "44", "48", "52", "flavour", "flavor", "exactly4lep", "four lepton"),
+            "total_charge_zero": ("charge", "zero", "==0"),
+        }
+        missing = []
+        for component in required_components:
+            tokens = component_tokens.get(str(component), (str(component).replace("_", " "),))
+            if not any(_compact_expr(token) in compact for token in tokens):
+                missing.append(str(component))
+        minimum = spec.get("minimum_components")
+        if minimum is not None:
+            present_count = len(required_components) - len(missing)
+            achieved = 1.0 if present_count >= int(minimum) else 0.0
+        else:
+            achieved = 1.0 if not missing else 0.0
+        return (achieved, {"missing": missing})
+
     detector_region_evidence = (
         "eta" in text
         and any(token in text for token in ("veto", "transition", "crack", "exclude", "barrel", "endcap", "calorimeter"))
@@ -476,7 +798,9 @@ def _score_mass_dependent_selection(spec: dict[str, Any], trace: dict[str, Any])
 def _score_observable_construction(spec: dict[str, Any], trace: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
     text = _coerce_text(trace).lower()
     names = spec.get("observable_name_any_of") or ([spec.get("name")] if spec.get("name") else [])
-    inputs = spec.get("required_inputs", spec.get("inputs", []))
+    if spec.get("semantic_id") == "four_lepton_invariant_mass":
+        names = list(names) + ["four_lepton", "four lepton", "m4l", "m_4l", "mass"]
+    inputs = spec.get("required_inputs", spec.get("inputs_must_include", spec.get("inputs", [])))
     checks = {
         "name": not names or any(str(name).lower() in text for name in names),
         "inputs": all(str(value).lower() in text for value in inputs),
@@ -516,17 +840,449 @@ def _score_data_scope(spec: dict[str, Any], trace: dict[str, Any]) -> Tuple[floa
     )
 
 
+def _normalize_ref(value: str) -> str:
+    return value.strip().strip(".,;:)]}\"'")
+
+
+def _root_refs_from_trace(trace: dict[str, Any]) -> set[str]:
+    refs: set[str] = set()
+    for value in _all_strings(trace):
+        for match in re.findall(r"https?://[^\s\"']+?\.root|/[^\s\"']+?\.root|[A-Za-z0-9_.+-]+\.root", value):
+            refs.add(_normalize_ref(match))
+    return refs
+
+
+def _manifest_allowed_refs(manifest: dict[str, Any]) -> set[str]:
+    refs: set[str] = set()
+    for entry in manifest.get("files", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        for key in ("logical_name", "path", "source"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                refs.add(value)
+                refs.add(Path(value).name)
+    return refs
+
+
+def _ref_is_allowed(ref: str, allowed_refs: set[str]) -> bool:
+    normalized = _normalize_ref(ref)
+    basename = Path(normalized).name
+    return normalized in allowed_refs or basename in allowed_refs
+
+
+def _score_hzz_sample_manifest_coverage(
+    spec: dict[str, Any],
+    submission_dir: Path,
+    trace: dict[str, Any],
+) -> Tuple[float, Dict[str, Any]]:
+    manifest_file = spec.get("input_manifest_file", "input_manifest.json")
+    manifest = _load_json_if_exists(submission_dir / str(manifest_file))
+    if not isinstance(manifest, dict):
+        return (0.0, {"reason": "missing_multi_sample_manifest", "manifest_file": manifest_file})
+    manifest_samples = manifest.get("samples")
+    if not isinstance(manifest_samples, list):
+        manifest_samples = manifest.get("sample_groups")
+    if not isinstance(manifest_samples, list):
+        return (0.0, {"reason": "missing_multi_sample_manifest", "manifest_file": manifest_file})
+
+    required_sample_names = spec.get("required_sample_names") or []
+    required_sample_ids = spec.get("required_sample_ids") or spec.get("required_sample_group_ids") or [
+        sample.get("id") for sample in manifest_samples if isinstance(sample, dict)
+    ]
+    required_sample_names = [str(name) for name in required_sample_names if name]
+    required_sample_ids = [str(sample_id) for sample_id in required_sample_ids if sample_id]
+
+    trace_text = _coerce_text(trace).lower()
+    trace_refs = _root_refs_from_trace(trace)
+    allowed_refs = _manifest_allowed_refs(manifest)
+    off_manifest_refs = sorted(ref for ref in trace_refs if not _ref_is_allowed(ref, allowed_refs))
+
+    files_by_sample_id: dict[str, list[dict[str, Any]]] = {}
+    files_by_sample_name: dict[str, list[dict[str, Any]]] = {}
+    for entry in manifest.get("files", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        sample_id = entry.get("sample_id") or entry.get("sample_group_id")
+        sample_name = entry.get("sample_name") or entry.get("sample_group_label")
+        if isinstance(sample_id, str):
+            files_by_sample_id.setdefault(sample_id, []).append(entry)
+        if isinstance(sample_name, str):
+            files_by_sample_name.setdefault(sample_name, []).append(entry)
+
+    samples_by_id = {
+        sample.get("id"): sample
+        for sample in manifest_samples
+        if isinstance(sample, dict) and isinstance(sample.get("id"), str)
+    }
+    samples_by_name = {
+        (sample.get("name") or sample.get("label")): sample
+        for sample in manifest_samples
+        if isinstance(sample, dict) and isinstance(sample.get("name") or sample.get("label"), str)
+    }
+
+    missing_samples: list[str] = []
+    required_samples: list[tuple[str, str]] = [("id", sample_id) for sample_id in required_sample_ids]
+    required_samples.extend(("name", name) for name in required_sample_names)
+    for kind, required in required_samples:
+        sample = samples_by_id.get(required, {}) if kind == "id" else samples_by_name.get(required, {})
+        sample_name = str(sample.get("name") or sample.get("label") or "")
+        sample_id = str(sample.get("id") or "")
+        labels = [required, sample_id, sample_name, str(sample.get("role", ""))]
+        mentioned = any(label and label.lower() in trace_text for label in labels)
+        if not mentioned:
+            candidate_files = files_by_sample_id.get(required, []) if kind == "id" else files_by_sample_name.get(required, [])
+            for entry in candidate_files:
+                refs = [entry.get("logical_name"), entry.get("path"), entry.get("source")]
+                if any(isinstance(ref, str) and ref and ref.lower() in trace_text for ref in refs):
+                    mentioned = True
+                    break
+        if not mentioned:
+            missing_samples.append(required)
+
+    ok = not missing_samples and (not spec.get("reject_off_manifest_root_refs", True) or not off_manifest_refs)
+    return (
+        1.0 if ok else 0.0,
+        {
+            "missing_samples": missing_samples,
+            "off_manifest_root_refs": off_manifest_refs,
+            "manifest_sample_ids": sorted(samples_by_id),
+            "manifest_sample_names": sorted(samples_by_name),
+            "trace_root_ref_count": len(trace_refs),
+        },
+    )
+
+
+def _score_trace_data_assembly_semantics(
+    spec: dict[str, Any],
+    submission_dir: Path,
+    trace: dict[str, Any],
+) -> Tuple[float, Dict[str, Any]]:
+    text = _coerce_text(trace).lower()
+    manifest = _load_json_if_exists(submission_dir / "input_manifest.json")
+    manifest = manifest if isinstance(manifest, dict) else {}
+    manifest_text = _coerce_text(manifest).lower()
+    combined_text = f"{text} {manifest_text}"
+
+    missing: list[str] = []
+    expected_skim = spec.get("expected_skim")
+    if isinstance(expected_skim, str) and expected_skim.lower() not in combined_text:
+        missing.append(f"skim:{expected_skim}")
+    expected_source = spec.get("expected_source")
+    if isinstance(expected_source, str):
+        source_tokens = [expected_source.lower(), expected_source.replace("_", " ").lower(), "atlas open data"]
+        if "atlas" in expected_source.lower():
+            source_tokens.extend(["opendata/atlas", "atlas/rucio", "atlas"])
+        if not any(token in combined_text for token in source_tokens):
+            missing.append(f"source:{expected_source}")
+
+    manifest_roles = {
+        entry.get("role")
+        for entry in (manifest.get("samples") or manifest.get("sample_groups") or [])
+        if isinstance(entry, dict)
+    }
+    trace_roles = set(re.findall(r"\b(data|background|signal)\b", text))
+    present_roles = {str(role) for role in manifest_roles if role} | trace_roles
+    for role in spec.get("required_sample_roles", []) or []:
+        if str(role) not in present_roles:
+            missing.append(f"role:{role}")
+
+    semantic_tokens = {
+        "background_combination_mode": ("stack", "sum", "background"),
+        "signal_usage_mode": ("signal", "overlay", "template", "reference"),
+        "data_usage_mode": ("data", "observed"),
+    }
+    for key, tokens in semantic_tokens.items():
+        if spec.get(key) and not any(token in combined_text for token in tokens):
+            missing.append(key)
+
+    return (
+        1.0 if not missing else 0.0,
+        {"missing": missing, "manifest_roles": sorted(present_roles)},
+    )
+
+
+def _score_mc_weighting_strategy(spec: dict[str, Any], trace: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
+    text = _coerce_text(trace).lower()
+    compact = _compact_expr(text)
+    missing: list[str] = []
+    if spec.get("data_policy") == "unweighted" and "unweighted" not in text:
+        missing.append("data_policy:unweighted")
+    if spec.get("mc_policy") and not any(token in text for token in ("weighted", "weighting", "normaliz", "normalis", "luminosity")):
+        missing.append(f"mc_policy:{spec.get('mc_policy')}")
+    luminosity = spec.get("luminosity_fb_inv")
+    if luminosity is not None:
+        lum_text = str(luminosity).rstrip("0").rstrip(".")
+        if lum_text not in text:
+            missing.append(f"luminosity:{luminosity}")
+
+    factor_aliases = {
+        "sum_of_weights": ("sum_of_weights", "sum of weights", "sumweights", "sumw"),
+        "mcweight": ("mcweight", "mc weight", "event weight"),
+        "xsec": ("xsec", "cross section", "cross-section", "cross_section"),
+        "filteff": ("filteff", "filter efficiency", "filter_efficiency"),
+        "kfac": ("kfac", "k-factor", "k factor"),
+        "scale_factor": ("scale factor", "scale factors", "scalefactor", "scalefactors"),
+        "pileup": ("pileup", "pile-up", "scale factor"),
+        "electron_scale_factor": ("scalefactor_ele", "scale factor ele", "electron scale factor", "scale factor"),
+        "muon_scale_factor": ("scalefactor_muon", "scale factor muon", "muon scale factor", "scale factor"),
+        "trigger_scale_factor": ("scalefactor_leptrigger", "trigger scale factor", "leptrigger", "scale factor"),
+    }
+
+    def factor_present(raw: str) -> bool:
+        key = raw.lower()
+        normalized_key = _compact_expr(key)
+        aliases = [raw]
+        if normalized_key in {"mcweight"}:
+            aliases.extend(factor_aliases["mcweight"])
+        elif normalized_key in {"sum_of_weights", "sumofweights"}:
+            aliases.extend(factor_aliases["sum_of_weights"])
+        elif normalized_key in {"xsec"}:
+            aliases.extend(factor_aliases["xsec"])
+        elif normalized_key in {"filteff"}:
+            aliases.extend(factor_aliases["filteff"])
+        elif normalized_key in {"kfac"}:
+            aliases.extend(factor_aliases["kfac"])
+        elif normalized_key.startswith("scalefactor"):
+            aliases.extend(factor_aliases["scale_factor"])
+            if "pileup" in normalized_key:
+                aliases.extend(factor_aliases["pileup"])
+            if "ele" in normalized_key:
+                aliases.extend(factor_aliases["electron_scale_factor"])
+            if "muon" in normalized_key:
+                aliases.extend(factor_aliases["muon_scale_factor"])
+            if "trigger" in normalized_key:
+                aliases.extend(factor_aliases["trigger_scale_factor"])
+        return any(alias.lower() in text or _compact_expr(alias) in compact for alias in aliases)
+
+    for factor in spec.get("required_mc_factors", []) or []:
+        if not factor_present(str(factor)):
+            missing.append(str(factor))
+
+    factor_groups = spec.get("required_factor_groups", [])
+    group_tokens = {
+        "event_weight": factor_aliases["mcweight"],
+        "cross_section": factor_aliases["xsec"],
+        "filter_efficiency": factor_aliases["filteff"],
+        "k_factor": factor_aliases["kfac"],
+        "sum_of_weights": factor_aliases["sum_of_weights"],
+        "scale_factors": factor_aliases["scale_factor"],
+        "luminosity": ("luminosity", "fb", "fb^-1", "fb-1"),
+    }
+    present_groups: list[str] = []
+    missing_groups: list[str] = []
+    if isinstance(factor_groups, list):
+        for group in [str(value) for value in factor_groups]:
+            tokens = group_tokens.get(group, (group.replace("_", " "),))
+            if any(token.lower() in text or _compact_expr(token) in compact for token in tokens):
+                present_groups.append(group)
+            else:
+                missing_groups.append(group)
+        minimum_groups = int(spec.get("minimum_factor_groups", len(factor_groups)))
+        if len(present_groups) < minimum_groups:
+            missing.extend(f"group:{group}" for group in missing_groups)
+
+    return (
+        1.0 if not missing else 0.0,
+        {"missing": missing, "present_factor_groups": present_groups, "missing_factor_groups": missing_groups},
+    )
+
+
+def _numeric_series(artifact: dict[str, Any], field: str) -> list[float]:
+    values = _get_any_field(artifact, [field], [])
+    if not isinstance(values, list):
+        return []
+    result: list[float] = []
+    for value in values:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            result.append(float(value))
+        else:
+            return []
+    return result
+
+
+def _bin_centers_from_artifact(artifact: dict[str, Any]) -> list[float]:
+    centers = _get_any_field(artifact, FIELD_ALIASES["bin_centers"], [])
+    if isinstance(centers, list) and centers:
+        return [float(value) for value in centers if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    edges = _get_any_field(artifact, FIELD_ALIASES["bin_edges"], [])
+    if not isinstance(edges, list) or len(edges) < 2:
+        return []
+    return [
+        0.5 * (float(lo) + float(hi))
+        for lo, hi in zip(edges[:-1], edges[1:])
+        if isinstance(lo, (int, float)) and isinstance(hi, (int, float))
+    ]
+
+
+def _series_for_artifact(artifact: dict[str, Any], field: str) -> list[float]:
+    if field == "data_minus_background":
+        data = _numeric_series(artifact, "data_counts")
+        background = _numeric_series(artifact, "total_background_counts") or _numeric_series(artifact, "background_counts")
+        if len(data) == len(background):
+            return [left - right for left, right in zip(data, background)]
+        return []
+    return _numeric_series(artifact, field)
+
+
+def _interval_overlap_width(left: list[Any], right: list[Any]) -> float:
+    if len(left) != 2 or len(right) != 2:
+        return 0.0
+    lo = max(float(left[0]), float(right[0]))
+    hi = min(float(left[1]), float(right[1]))
+    return max(0.0, hi - lo)
+
+
+def _score_artifact_numeric_relationships(spec: dict[str, Any], artifacts: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
+    filename = spec.get("file")
+    artifact = artifacts.get(filename, {}) if isinstance(filename, str) else {}
+    if not isinstance(artifact, dict):
+        return (0.0, {"reason": "missing_artifact", "file": filename})
+
+    failures: list[dict[str, Any]] = []
+    for relation in spec.get("required_relations", []) or []:
+        if not isinstance(relation, dict):
+            continue
+        kind = relation.get("relation")
+        if kind == "interval_overlaps":
+            field = relation.get("field")
+            value = artifact.get(field)
+            target = relation.get("target_interval", [])
+            overlap = _interval_overlap_width(value, target) if isinstance(value, list) and isinstance(target, list) else 0.0
+            minimum = float(relation.get("minimum_overlap_width_gev", 0.0))
+            if overlap < minimum:
+                failures.append({"relation": kind, "field": field, "value": value, "target": target, "overlap": overlap})
+        elif kind == "greater_or_equal":
+            left = artifact.get(relation.get("left_field"))
+            right = artifact.get(relation.get("right_field"))
+            ok = isinstance(left, (int, float)) and isinstance(right, (int, float)) and float(left) >= float(right)
+            if not ok:
+                failures.append({"relation": kind, "left": left, "right": right})
+        elif kind == "range":
+            field = relation.get("field")
+            value = artifact.get(field)
+            expected = relation.get("expected_range", [])
+            lo = expected[0] if isinstance(expected, list) and expected else None
+            hi = expected[1] if isinstance(expected, list) and len(expected) > 1 else None
+            ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+            ok = ok and (lo is None or float(value) >= float(lo)) and (hi is None or float(value) <= float(hi))
+            if not ok:
+                failures.append({"relation": kind, "field": field, "value": value, "expected_range": expected})
+    return (1.0 if not failures else 0.0, {"failures": failures})
+
+
+def _score_artifact_series_usable(spec: dict[str, Any], artifacts: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
+    filename = spec.get("file")
+    field = spec.get("field")
+    artifact = artifacts.get(filename, {}) if isinstance(filename, str) else {}
+    if not isinstance(artifact, dict) or not isinstance(field, str):
+        return (0.0, {"reason": "missing_artifact_or_field", "file": filename, "field": field})
+    series = _numeric_series(artifact, field)
+    requirements = set(spec.get("requirements", []) or [])
+    failures: list[str] = []
+    if "nonempty" in requirements and not series:
+        failures.append("nonempty")
+    if "nonnegative_values" in requirements and any(value < 0 for value in series):
+        failures.append("nonnegative_values")
+    return (1.0 if not failures else 0.0, {"failures": failures, "count": len(series)})
+
+
+def _score_histogram_excess_in_region(spec: dict[str, Any], artifacts: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
+    filename = spec.get("file")
+    artifact = artifacts.get(filename, {}) if isinstance(filename, str) else {}
+    if not isinstance(artifact, dict):
+        return (0.0, {"reason": "missing_artifact", "file": filename})
+    centers = _bin_centers_from_artifact(artifact)
+    numerator = _series_for_artifact(artifact, str(spec.get("numerator_field", "data_counts")))
+    denominator = _series_for_artifact(artifact, str(spec.get("denominator_field", "background_counts")))
+    roi = spec.get("roi", [])
+    if len(centers) != len(numerator) or len(numerator) != len(denominator) or not isinstance(roi, list) or len(roi) != 2:
+        return (0.0, {"reason": "missing_or_misaligned_histogram_data"})
+    diffs = [num - den for center, num, den in zip(centers, numerator, denominator) if float(roi[0]) <= center <= float(roi[1])]
+    if not diffs:
+        return (0.0, {"reason": "no_bins_in_roi"})
+    integrated = sum(diffs)
+    any_bin = max(diffs)
+    ok = integrated > float(spec.get("require_integrated_difference_greater_than", float("-inf")))
+    ok = ok and any_bin > float(spec.get("require_any_bin_difference_greater_than", float("-inf")))
+    return (1.0 if ok else 0.0, {"integrated_difference": integrated, "max_bin_difference": any_bin})
+
+
+def _score_histogram_peak_location(spec: dict[str, Any], artifacts: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
+    filename = spec.get("file")
+    artifact = artifacts.get(filename, {}) if isinstance(filename, str) else {}
+    if not isinstance(artifact, dict):
+        return (0.0, {"reason": "missing_artifact", "file": filename})
+    centers = _bin_centers_from_artifact(artifact)
+    series_name = str(spec.get("primary_series", ""))
+    series = _series_for_artifact(artifact, series_name)
+    used_series = series_name
+    if not series and spec.get("fallback_series"):
+        used_series = str(spec.get("fallback_series"))
+        series = _series_for_artifact(artifact, used_series)
+    expected = spec.get("expected_range", [])
+    if len(centers) != len(series) or not isinstance(expected, list) or len(expected) != 2:
+        return (0.0, {"reason": "missing_or_misaligned_histogram_data", "series": used_series})
+    peak_idx = max(range(len(series)), key=lambda idx: series[idx])
+    peak_x = centers[peak_idx]
+    peak_y = series[peak_idx]
+    ok = float(expected[0]) <= peak_x <= float(expected[1])
+    return (1.0 if ok else 0.0, {"peak_x": peak_x, "peak_y": peak_y, "series": used_series, "expected_range": expected})
+
+
 def _score_validation_evidence(spec: dict[str, Any], submission_dir: Path, trace: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
     optional_files = spec.get("optional_files_any", [])
     existing = [filename for filename in optional_files if (submission_dir / filename).exists()]
     trace_text = _coerce_text(trace).lower()
     labels = spec.get("trace_stage_families_any_labels", spec.get("allowed_validation_types", []))
-    matching_labels = [label for label in labels if str(label).replace("_", " ").lower() in trace_text or str(label).lower() in trace_text]
+    compact = _compact_expr(trace_text)
+    matching_labels = [
+        label
+        for label in labels
+        if str(label).replace("_", " ").lower() in trace_text
+        or str(label).lower() in trace_text
+        or _compact_expr(str(label)) in compact
+    ]
     min_count = int(spec.get("minimum_count", 1))
     count = len(existing) + len(matching_labels)
-    if spec.get("requires_result_record") and ("validation" in trace_text or "robust" in trace_text or "stability" in trace_text):
+    validation_fields = [
+        field
+        for field in ("validation_checks", "validation_actions", "cross_checks", "robustness_checks")
+        if trace.get(field)
+    ]
+    generic_tokens = (
+        "validation",
+        "validate",
+        "robust",
+        "stability",
+        "sideband",
+        "alternative",
+        "cross check",
+        "cross-check",
+        "sanity",
+        "uncertainty",
+        "scan",
+        "variation",
+    )
+    generic_evidence = any(token in trace_text for token in generic_tokens)
+    count += len(validation_fields)
+    if spec.get("requires_result_record") and (generic_evidence or validation_fields):
         count += 1
-    return (1.0 if count >= min_count else 0.0, {"existing_files": existing, "matching_labels": matching_labels, "count": count})
+    return (
+        1.0 if count >= min_count else 0.0,
+        {
+            "existing_files": existing,
+            "matching_labels": matching_labels,
+            "validation_fields": validation_fields,
+            "generic_evidence": generic_evidence,
+            "count": count,
+        },
+    )
+
+
+def _has_validation_evidence(trace: dict[str, Any]) -> bool:
+    score, evidence = _score_validation_evidence({"minimum_count": 1, "requires_result_record": True}, Path("."), trace)
+    return bool(score) or bool(evidence.get("generic_evidence"))
 
 
 def _residual_points(artifact: Any) -> list[tuple[float, float]]:
@@ -581,6 +1337,156 @@ def _score_cross_artifact_consistency(spec: dict[str, Any], artifacts: dict[str,
     return (1.0 if ok else 0.0, {"fit": fit_evidence, "residual": residual_evidence})
 
 
+def _numeric_value(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _relative_close(left: float, right: float, *, rel_tol: float, abs_tol: float) -> bool:
+    return abs(left - right) <= max(abs_tol, rel_tol * max(1.0, abs(right)))
+
+
+def _window_from_summary(summary: dict[str, Any], spec: dict[str, Any]) -> list[float]:
+    configured = spec.get("signal_region") or spec.get("window") or spec.get("roi")
+    if isinstance(configured, list) and len(configured) == 2:
+        return [float(configured[0]), float(configured[1])]
+    field = str(spec.get("summary_window_field", "signal_region"))
+    value = summary.get(field)
+    if isinstance(value, list) and len(value) == 2:
+        return [float(value[0]), float(value[1])]
+    return []
+
+
+def _integrate_series_in_window(artifact: dict[str, Any], field: str, window: list[float]) -> float | None:
+    series = _series_for_artifact(artifact, field)
+    if not series or len(window) != 2:
+        return None
+    edges = _get_any_field(artifact, FIELD_ALIASES["bin_edges"], [])
+    if isinstance(edges, list) and len(edges) == len(series) + 1:
+        total = 0.0
+        for lo, hi, value in zip(edges[:-1], edges[1:], series):
+            if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+                return None
+            width = float(hi) - float(lo)
+            if width <= 0:
+                return None
+            overlap = _interval_overlap_width([lo, hi], window)
+            if overlap > 0:
+                total += float(value) * overlap / width
+        return total
+    centers = _bin_centers_from_artifact(artifact)
+    if len(centers) == len(series):
+        return sum(float(value) for center, value in zip(centers, series) if window[0] <= center <= window[1])
+    return None
+
+
+def _score_artifact_window_consistency(
+    spec: dict[str, Any],
+    artifacts: dict[str, Any],
+    trace: dict[str, Any],
+) -> Tuple[float, Dict[str, Any]]:
+    spectrum_file = spec.get("spectrum_file")
+    summary_file = spec.get("summary_file")
+    spectrum = artifacts.get(spectrum_file, {}) if isinstance(spectrum_file, str) else {}
+    summary = artifacts.get(summary_file, {}) if isinstance(summary_file, str) else {}
+    if not isinstance(spectrum, dict) or not isinstance(summary, dict):
+        return (0.0, {"reason": "missing_artifact", "spectrum_file": spectrum_file, "summary_file": summary_file})
+
+    window = _window_from_summary(summary, spec)
+    if len(window) != 2:
+        return (0.0, {"reason": "missing_window"})
+
+    data_field = str(spec.get("data_field", "data_counts"))
+    background_field = str(spec.get("background_field", "total_background_counts"))
+    signal_field = spec.get("signal_field")
+    data_yield = _integrate_series_in_window(spectrum, data_field, window)
+    background_yield = _integrate_series_in_window(spectrum, background_field, window)
+    signal_yield = _integrate_series_in_window(spectrum, str(signal_field), window) if isinstance(signal_field, str) else None
+    if data_yield is None or background_yield is None:
+        return (0.0, {"reason": "missing_window_series", "window": window})
+
+    rel_tol = float(spec.get("relative_tolerance", 0.05))
+    abs_tol = float(spec.get("absolute_tolerance", 1e-6))
+    failures: list[dict[str, Any]] = []
+    checks: dict[str, Any] = {
+        "window": window,
+        "derived_data_yield": data_yield,
+        "derived_background_yield": background_yield,
+        "derived_signal_yield": signal_yield,
+    }
+
+    summary_background_field = str(spec.get("summary_background_field", "window_background_yield"))
+    summary_background = _numeric_value(summary.get(summary_background_field))
+    if summary_background is not None:
+        checks["summary_background_yield"] = summary_background
+        if not _relative_close(summary_background, background_yield, rel_tol=rel_tol, abs_tol=abs_tol):
+            failures.append({"field": summary_background_field, "summary": summary_background, "derived": background_yield})
+
+    summary_data_field = spec.get("summary_data_field")
+    if isinstance(summary_data_field, str):
+        summary_data = _numeric_value(summary.get(summary_data_field))
+        checks["summary_data_yield"] = summary_data
+        if summary_data is None or not _relative_close(summary_data, data_yield, rel_tol=rel_tol, abs_tol=abs_tol):
+            failures.append({"field": summary_data_field, "summary": summary_data, "derived": data_yield})
+
+    numerator_field = spec.get("summary_numerator_field")
+    numerator_policy = str(spec.get("summary_numerator_policy", "data"))
+    summary_numerator: float | None = None
+    expected_numerator: float | None = None
+    if isinstance(numerator_field, str):
+        summary_numerator = _numeric_value(summary.get(numerator_field))
+        if numerator_policy == "background_plus_signal":
+            expected_numerator = None if signal_yield is None else background_yield + signal_yield
+        elif numerator_policy == "data_minus_background":
+            expected_numerator = data_yield - background_yield
+        else:
+            expected_numerator = data_yield
+        checks["summary_numerator_yield"] = summary_numerator
+        checks["expected_numerator_yield"] = expected_numerator
+        if (
+            summary_numerator is None
+            or expected_numerator is None
+            or not _relative_close(summary_numerator, expected_numerator, rel_tol=rel_tol, abs_tol=abs_tol)
+        ):
+            failures.append({"field": numerator_field, "summary": summary_numerator, "derived": expected_numerator})
+
+    significance_field = spec.get("significance_field", "significance_proxy")
+    significance = _numeric_value(summary.get(str(significance_field)))
+    significance_formula = str(spec.get("significance_formula", "data_minus_background_over_sqrt_background"))
+    expected_significance: float | None = None
+    if significance_formula == "data_minus_background_over_sqrt_background" and background_yield > 0:
+        expected_significance = (data_yield - background_yield) / (background_yield ** 0.5)
+    elif significance_formula == "numerator_minus_background_over_sqrt_background" and background_yield > 0:
+        numerator_for_significance = summary_numerator if summary_numerator is not None else expected_numerator
+        if numerator_for_significance is not None:
+            expected_significance = (numerator_for_significance - background_yield) / (background_yield ** 0.5)
+    elif significance_formula == "signal_over_sqrt_background" and signal_yield is not None and background_yield > 0:
+        expected_significance = signal_yield / (background_yield ** 0.5)
+    checks["summary_significance"] = significance
+    checks["expected_significance"] = expected_significance
+    if significance is not None and expected_significance is not None:
+        sig_abs_tol = float(spec.get("significance_absolute_tolerance", 0.05))
+        sig_rel_tol = float(spec.get("significance_relative_tolerance", 0.05))
+        if not _relative_close(significance, expected_significance, rel_tol=sig_rel_tol, abs_tol=sig_abs_tol):
+            failures.append({"field": significance_field, "summary": significance, "derived": expected_significance})
+
+    threshold = spec.get("validation_required_above_significance")
+    validation_present = _has_validation_evidence(trace)
+    checks["validation_evidence_present"] = validation_present
+    if threshold is not None and significance is not None and abs(significance) >= float(threshold) and not validation_present:
+        failures.append(
+            {
+                "field": significance_field,
+                "summary": significance,
+                "reason": "high_significance_without_validation_evidence",
+                "threshold": float(threshold),
+            }
+        )
+
+    return (1.0 if not failures else 0.0, {"failures": failures, **checks})
+
+
 def _score_deterministic(
     condition: Dict[str, Any],
     submission_dir: Path,
@@ -594,6 +1500,10 @@ def _score_deterministic(
         return _score_required_files([str(name) for name in condition["required_files"]], submission_dir)
     if "files_nonempty" in condition:
         return _score_files_nonempty([str(name) for name in condition["files_nonempty"]], submission_dir)
+    if "file_nonempty" in condition:
+        spec = condition["file_nonempty"]
+        files = spec.get("files", []) if isinstance(spec, dict) else spec
+        return _score_files_nonempty([str(name) for name in files], submission_dir)
 
     if "object_definition" in condition:
         actual = trace.get("object_definition", {})
@@ -609,8 +1519,9 @@ def _score_deterministic(
                 failures.append({"cut_id": expected["cut_id"], "reason": "missing"})
                 continue
             for key, value in expected.items():
-                if not _match_subset(actual.get(key), value):
-                    failures.append({"cut_id": expected["cut_id"], "field": key, "expected": value, "actual": actual.get(key)})
+                if not _selection_field_matches(actual, key, value):
+                    actual_key = key.removesuffix("_any_of")
+                    failures.append({"cut_id": expected["cut_id"], "field": key, "expected": value, "actual": actual.get(actual_key)})
                     break
         return (1.0 if not failures else 0.0, {"failures": failures})
 
@@ -658,6 +1569,12 @@ def _score_deterministic(
         return _score_numeric_range(condition["artifact_value_in_range"], artifacts)
     if "artifact_histogram_properties" in condition:
         return _score_histogram_properties(condition["artifact_histogram_properties"], artifacts)
+    if "artifact_numeric_relationships" in condition:
+        return _score_artifact_numeric_relationships(condition["artifact_numeric_relationships"], artifacts)
+    if "artifact_window_consistency" in condition:
+        return _score_artifact_window_consistency(condition["artifact_window_consistency"], artifacts, trace)
+    if "artifact_series_usable" in condition:
+        return _score_artifact_series_usable(condition["artifact_series_usable"], artifacts)
     if "artifact_field_constraints" in condition:
         spec = condition["artifact_field_constraints"]
         return (1.0 if artifacts.get(spec.get("file")) else 0.0, {"checked": "artifact_field_constraints"})
@@ -699,6 +1616,10 @@ def _score_structural(
 
     if "files_nonempty" in condition:
         return _score_files_nonempty([str(name) for name in condition["files_nonempty"]], submission_dir)
+    if "file_nonempty" in condition:
+        spec = condition["file_nonempty"]
+        files = spec.get("files", []) if isinstance(spec, dict) else spec
+        return _score_files_nonempty([str(name) for name in files], submission_dir)
     if "trace_required_fields" in condition:
         return _score_required_trace_fields(condition["trace_required_fields"], trace)
     if "trace_stage_families_present" in condition:
@@ -707,6 +1628,10 @@ def _score_structural(
         return _score_stage_family_order(condition["trace_stage_family_order"], trace)
     if "scientifically_valid_selection_evidence" in condition:
         return _score_selection_evidence(condition["scientifically_valid_selection_evidence"], trace)
+    if "trace_data_assembly_semantics" in condition:
+        return _score_trace_data_assembly_semantics(condition["trace_data_assembly_semantics"], submission_dir, trace)
+    if "mc_weighting_strategy" in condition:
+        return _score_mc_weighting_strategy(condition["mc_weighting_strategy"], trace)
     if "trace_mass_dependent_selection" in condition:
         return _score_mass_dependent_selection(condition["trace_mass_dependent_selection"], trace)
     if "trace_observable_construction" in condition:
@@ -719,6 +1644,8 @@ def _score_structural(
         return _score_data_scope(condition["trace_data_scope_coverage"], trace)
     if "data_scope_coverage" in condition:
         return _score_data_scope(condition["data_scope_coverage"], trace)
+    if "hzz_sample_manifest_coverage" in condition:
+        return _score_hzz_sample_manifest_coverage(condition["hzz_sample_manifest_coverage"], submission_dir, trace)
     if "workflow_evidence_present" in condition:
         return _score_stage_families_present(
             {"required_families": ["data_access", "selection", "observable_construction", "spectrum_construction", "inference_or_signal_localization", "interpretation"]},
@@ -756,6 +1683,10 @@ def _score_heuristic(
         files = condition["model_data_coherence"].get("files", {})
         missing = [name for name in files.values() if not artifacts.get(name)]
         return (1.0 if not missing else 0.0, {"missing": missing})
+    if "histogram_excess_in_region" in condition:
+        return _score_histogram_excess_in_region(condition["histogram_excess_in_region"], artifacts)
+    if "histogram_peak_location" in condition:
+        return _score_histogram_peak_location(condition["histogram_peak_location"], artifacts)
     if "validation_targets_signal_inference" in condition:
         text = _coerce_text(trace).lower()
         ok = "125" in text or "signal" in text or "excess" in text

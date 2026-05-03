@@ -1,0 +1,104 @@
+version: 1
+level: l2
+required_outputs:
+- name: four_lepton_mass_spectrum
+  canonical_filename: four_lepton_mass_spectrum.json
+  type: json
+  machine_readable: true
+- name: four_lepton_excess_summary
+  canonical_filename: four_lepton_excess_summary.json
+  type: json
+  machine_readable: true
+- name: interpretation
+  canonical_filename: interpretation.md
+  type: markdown
+  machine_readable: false
+- name: submission_trace
+  canonical_filename: submission_trace.json
+  type: json
+  machine_readable: true
+optional_outputs:
+- name: four_lepton_mass_spectrum_plot
+  canonical_filename: four_lepton_mass_spectrum_plot.image_ref
+  type: image_ref
+  machine_readable: false
+schemas:
+  four_lepton_mass_spectrum.json:
+    required_fields:
+    - observable
+    - bin_edges
+    - data_counts
+    - total_background_counts
+    - total_background_uncertainty
+    - signal_counts
+    field_types:
+      observable: string
+      bin_edges: array_float
+      data_counts: array_number
+      total_background_counts: array_number
+      total_background_uncertainty: array_number
+      signal_counts: array_number
+  four_lepton_excess_summary.json:
+    required_fields:
+    - method_type
+    - signal_region
+    - window_background_yield
+    - window_numerator_yield
+    - significance_proxy
+    field_types:
+      method_type: string
+      signal_region: array_float
+      window_background_yield: float
+      window_numerator_yield: float
+      significance_proxy: float
+  interpretation.md:
+    required_sections: []
+    constraints:
+      non_empty: true
+      min_characters: 20
+  four_lepton_mass_spectrum_plot.image_ref:
+    required_fields: []
+    field_types: {}
+  submission_trace.json:
+    required_fields:
+    - workflow_stages
+    - scientific_decisions
+    - input_samples_used
+    - observable_constructed
+    - inference_strategy
+    - output_files_generated
+    field_types:
+      workflow_stages: array_object
+      scientific_decisions: array_string
+      observable_constructed: object
+      inference_strategy: object
+      output_files_generated: array_string
+      input_samples_used: array_object
+    nested_required_fields:
+      workflow_stages:
+        required_fields:
+        - stage_label
+        - status
+      observable_constructed:
+        required_fields:
+        - name
+      inference_strategy:
+        required_fields:
+        - method_family
+      input_samples_used:
+        required_fields:
+        - sample_name
+        - sample_role
+        - files_used
+    constraints:
+      output_files_generated:
+        min_length: 4
+        contains_all:
+        - four_lepton_mass_spectrum.json
+        - four_lepton_excess_summary.json
+        - interpretation.md
+        - submission_trace.json
+      workflow_stages:
+        min_length: 1
+      scientific_decisions:
+        min_length: 1

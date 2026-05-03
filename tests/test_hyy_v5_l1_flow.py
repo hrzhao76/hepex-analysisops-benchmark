@@ -419,7 +419,7 @@ async def test_agent_hyy_v5_l1_submission_bundle_flow(monkeypatch, tmp_path):
     assert len(run_dirs) == 1
     task_dir = run_dirs[0] / task.id
     assert (task_dir / "submission_bundle_raw.json").exists()
-    assert (task_dir / "input_manifest.json").exists() is False
+    assert (task_dir / "input_manifest.json").exists()
     assert (task_dir / "diphoton_fit_summary.json").exists()
     assert (shared_input / "input_manifest.json").exists()
 

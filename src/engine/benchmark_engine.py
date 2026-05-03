@@ -9,7 +9,7 @@ from typing import Any, Optional, Protocol
 
 from tasks.task_spec import GreenConfig, TaskRuntimeOverride, TaskSpec, load_task_spec
 from utils import _new_run_id, _safe_write_json, _safe_write_text, _utc_now_iso
-from utils.atlas_download import ensure_atlas_open_data_downloaded
+from utils.atlas_download import ensure_atlas_open_data_downloaded, ensure_atlas_open_data_samples_downloaded
 from utils.mock_traces import get_mock_bundle
 
 from .evaluation import EvaluationEngine
@@ -107,8 +107,19 @@ class BenchmarkEngine:
             "n_ok",
             "n_fail",
             "n_existing_root_files",
+            "n_samples",
+            "samples",
         ]
         return {key: download_info[key] for key in keys if key in download_info}
+
+    @staticmethod
+    def _task_samples(task: TaskSpec) -> list[dict[str, Any]]:
+        requirements = getattr(task, "input_requirements", {}) or {}
+        samples = requirements.get("samples")
+        if isinstance(samples, list):
+            return samples
+        legacy_groups = requirements.get("sample_groups", [])
+        return legacy_groups if isinstance(legacy_groups, list) else []
 
     async def _ensure_green_shared_input(
         self,
@@ -120,9 +131,56 @@ class BenchmarkEngine:
         if not cfg.allow_green_download:
             return None
         if not getattr(task, "skim", None):
-            raise InputAccessError(f"Task {task.id} requested Green-managed download but no skim/sample is configured.")
+            raise InputAccessError(f"Task {task.id} requested Green-managed download but no skim is configured.")
 
         _, shared_dir, _ = resolve_shared_input_paths(task, cfg)
+        samples = self._task_samples(task)
+        if samples:
+            await observer.status(
+                (
+                    f"[{task.id}] Green downloading shared input samples: "
+                    f"{task.release}/{task.skim} ({len(samples)} samples, max_files_per_sample={getattr(task, 'max_files', 0) or 0})."
+                )
+            )
+            workers = int(os.environ.get("HEPEX_GREEN_DOWNLOAD_WORKERS", "6"))
+            download_info = ensure_atlas_open_data_samples_downloaded(
+                samples=samples,
+                skim=str(task.skim),
+                release=task.release,
+                protocol=task.protocol,
+                output_dir=str(shared_dir),
+                max_files_per_sample=getattr(task, "max_files", 0) or 0,
+                workers=workers,
+                verbose=True,
+            )
+            manifest = dict(download_info.get("input_manifest") or {})
+            manifest.update(
+                {
+                    "task_id": task.id,
+                    "dataset": task.dataset,
+                    "shared_input_dir": str(shared_dir),
+                    "input_manifest_path": str(resolve_shared_input_paths(task, cfg)[2]),
+                    "input_access_mode": cfg.input_access_mode,
+                }
+            )
+            manifest_path = Path(str(manifest["input_manifest_path"]))
+            _safe_write_json(manifest_path, manifest)
+            _safe_write_json(task_eval_dir / "input_manifest.json", manifest)
+            slim_download_info = {key: value for key, value in download_info.items() if key != "input_manifest"}
+            _safe_write_json(shared_dir / "green_download_manifest.json", slim_download_info)
+            _safe_write_json(task_eval_dir / "green_download_manifest.json", slim_download_info)
+
+            if int(download_info.get("n_requested") or 0) <= 0:
+                raise InputAccessError(f"Green downloader found no grouped input files for task {task.id}.")
+            if int(download_info.get("n_ok") or 0) <= 0 or int(download_info.get("n_fail") or 0) > 0:
+                raise InputAccessError(
+                    (
+                        f"Green grouped downloader failed for task {task.id}: "
+                        f"n_ok={download_info.get('n_ok')} n_fail={download_info.get('n_fail')}."
+                    )
+                )
+            return slim_download_info
+
         existing_roots = self._shared_root_files(shared_dir)
         requested_files = getattr(task, "max_files", 0) or 0
         enough_existing = bool(existing_roots) and (requested_files <= 0 or len(existing_roots) >= requested_files)
@@ -333,6 +391,8 @@ class BenchmarkEngine:
             download_summary = self._green_download_summary(download_info)
             if download_summary is not None:
                 data_info["download_summary"] = download_summary
+            if input_manifest is not None:
+                _safe_write_json(task_eval_dir / "input_manifest.json", input_manifest)
             _safe_write_json(task_eval_dir / "data_info.json", data_info)
             await observer.status(f"[{task.id}] Shared input ready: {data_info['n_files']} files.")
             return data_info, input_manifest
@@ -394,6 +454,7 @@ class BenchmarkEngine:
                 "input_strategy": task.input_strategy,
                 "shared_input_dir": input_manifest.get("shared_input_dir"),
                 "input_manifest_path": input_manifest.get("input_manifest_path"),
+                "samples": input_manifest.get("samples"),
                 "work_dir": solver_work_dir_str,
                 "output_dir": solver_work_dir_str,
                 "read_only_for_solver": True,

@@ -1,0 +1,48 @@
+id: t006_hzz4l_l2
+type: hzz4l_l2
+level: l2
+mode: call_white
+
+needs_data: true
+release: 2025e-13tev-beta
+dataset: data
+skim: exactly4lep
+max_files: 5
+
+requires_large_input_data: true
+supports_scenario_shared_input: true
+supports_local_shared_input: true
+input_strategy: shared_manifest
+solver_response_mode: submission_bundle_v1
+evaluation_mode: directory_contract_and_private_rubric_v1
+
+solver_prompt_path: solver_prompt.md
+submission_contract_path: submission_contract.yaml
+
+description: "Guided-autonomy HZZ4l L2 task: reconstruct a scientifically valid H -> ZZ* -> 4l excess analysis without treating the L1 baseline workflow as mandatory."
+input_requirements:
+  source: ATLAS Open Data
+  release: 2025e-13tev-beta
+  dataset: data
+  skim: exactly4lep
+  tree: analysis
+  max_files_semantics: per_sample
+  samples:
+    - name: Data
+      role: data
+      dids: ["data"]
+    - name: 'Background $Z,t\bar{t},t\bar{t}+V,VVV$'
+      role: background
+      dids: [410470, 410155, 410218, 410219, 412043, 364243, 364242, 364246, 364248, 700320, 700321, 700322, 700323, 700324, 700325]
+      color: "#6b59d3"
+    - name: 'Background $ZZ^{*}$'
+      role: background
+      dids: [700600]
+      color: "#ff0000"
+    - name: 'Signal ($m_H$ = 125 GeV)'
+      role: signal
+      dids: [345060, 346228, 346310, 346311, 346312, 346340, 346341, 346342]
+      color: "#00cdff"
+constraints:
+  response_format: submission_bundle_v1
+  allow_purple_network: false

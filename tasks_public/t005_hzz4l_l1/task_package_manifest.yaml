@@ -1,0 +1,23 @@
+schema_version: 1
+package_id: t005_hzz4l_l1
+task_id: t005_hzz4l_l1
+level: l1
+source: curated
+status: draft
+schema_versions:
+  task_spec: 1
+  submission_contract: 1
+  submission_bundle: 1
+  private_rubric: 1
+  task_package_manifest: 1
+contract_hashes:
+  submission_contract_canonical_sha256: eb31509374661a0d5284e3311e39435b3e75fd399a82229c47eb24fa0f870958
+files:
+  public:
+    - path: task_spec.yaml
+      sha256: 140b3eab3d942e57650b6ad13041fe62cd01ab92efb63f1ee90fc693dd22aea6
+    - path: solver_prompt.md
+      sha256: b21d8d4aba20ae2845b32b63d31ba896e95ebca863207778c3bdff167a0d3824
+    - path: submission_contract.yaml
+      sha256: 2986b5ba1c7d7c79452e44d65c0837648d59392214f635812927df02d2daa051
+  private: []

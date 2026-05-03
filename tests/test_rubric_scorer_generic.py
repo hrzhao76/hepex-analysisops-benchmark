@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 from engine.rubric_scorer import score_submission
@@ -327,6 +328,183 @@ def test_l2_selection_evidence_accepts_crack_exclusion_wording(tmp_path):
     assert report["check_results"][0]["passed"]
 
 
+def test_selection_cuts_accept_variable_aliases_and_operator_synonyms(tmp_path):
+    task_dir = tmp_path / "task"
+    submission_dir = tmp_path / "submission"
+    task_dir.mkdir()
+    submission_dir.mkdir()
+    contract = {
+        "version": 1,
+        "level": "l1",
+        "required_outputs": [
+            {"name": "submission_trace", "canonical_filename": "submission_trace.json", "type": "json"},
+            {"name": "interpretation", "canonical_filename": "interpretation.md", "type": "markdown"},
+        ],
+        "optional_outputs": [],
+        "schemas": {
+            "submission_trace.json": {"required_fields": ["cuts_applied"]},
+            "interpretation.md": {"constraints": {"non_empty": True}},
+        },
+    }
+    (task_dir / "submission_contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+    write_json(
+        submission_dir / "submission_trace.json",
+        {
+            "cuts_applied": [
+                {
+                    "cut_id": "event_trigger_requirement",
+                    "variable": "trigE OR trigM",
+                    "operator": "==",
+                    "value": True,
+                },
+                {
+                    "cut_id": "four_lepton_flavor_requirement",
+                    "variable": "sum(lep_type[0:4])",
+                    "operator": "in",
+                    "value": [44, 48, 52],
+                },
+            ]
+        },
+    )
+    (submission_dir / "interpretation.md").write_text("Trace-only fixture.", encoding="utf-8")
+    rubric = {
+        "version": 1,
+        "weights": {"implementation": 1.0},
+        "checks": {
+            "implementation": [
+                {
+                    "id": "selection_cuts",
+                    "type": "deterministic",
+                    "condition": {
+                        "selection_cuts": [
+                            {
+                                "cut_id": "event_trigger_requirement",
+                                "variable_any_of": ["event_trigger_pass", "trigE OR trigM"],
+                                "operator": "==",
+                                "value": True,
+                            },
+                            {
+                                "cut_id": "four_lepton_flavor_requirement",
+                                "variable_any_of": ["sum_lep_type", "sum(lep_type[0:4])"],
+                                "operator": "in_set",
+                                "value": [44, 48, 52],
+                            },
+                        ]
+                    },
+                    "score": 1.0,
+                }
+            ],
+        },
+    }
+    task = SimpleNamespace(
+        id="generic_l1",
+        type="hzz4l_l1",
+        level="l1",
+        spec_dir=str(task_dir),
+        submission_contract_path="submission_contract.yaml",
+    )
+
+    report = score_submission(task, submission_dir, rubric, {"status": "ok", "hard_checks_passed": True})
+
+    assert report["check_results"][0]["passed"]
+
+
+def test_hzz_selection_cuts_accept_equivalent_trace_expressions(tmp_path):
+    task_dir = tmp_path / "task"
+    submission_dir = tmp_path / "submission"
+    task_dir.mkdir()
+    submission_dir.mkdir()
+    contract = {
+        "version": 1,
+        "level": "l1",
+        "required_outputs": [
+            {"name": "submission_trace", "canonical_filename": "submission_trace.json", "type": "json"},
+            {"name": "interpretation", "canonical_filename": "interpretation.md", "type": "markdown"},
+        ],
+        "optional_outputs": [],
+        "schemas": {
+            "submission_trace.json": {"required_fields": ["cuts_applied"]},
+            "interpretation.md": {"constraints": {"non_empty": True}},
+        },
+    }
+    (task_dir / "submission_contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+    write_json(
+        submission_dir / "submission_trace.json",
+        {
+            "cuts_applied": [
+                {
+                    "cut_id": "typed_lepton_quality_requirement",
+                    "variable": "count((mu medium and looseIso) or (e looseID and looseIso)) over first four leptons",
+                    "operator": "==",
+                    "value": 4,
+                },
+                {
+                    "cut_id": "four_lepton_flavor_requirement",
+                    "variable": "lep_type[0]+lep_type[1]+lep_type[2]+lep_type[3]",
+                    "operator": "in",
+                    "value": [44, 48, 52],
+                },
+                {
+                    "cut_id": "total_charge_requirement",
+                    "variable": "lep_charge[0]+lep_charge[1]+lep_charge[2]+lep_charge[3]",
+                    "operator": "==",
+                    "value": 0,
+                },
+            ]
+        },
+    )
+    (submission_dir / "interpretation.md").write_text("Trace-only HZZ fixture.", encoding="utf-8")
+    rubric = {
+        "version": 1,
+        "weights": {"implementation": 1.0},
+        "checks": {
+            "implementation": [
+                {
+                    "id": "selection_cuts",
+                    "type": "deterministic",
+                    "condition": {
+                        "selection_cuts": [
+                            {
+                                "cut_id": "typed_lepton_quality_requirement",
+                                "variable_any_of": [
+                                    "typed_quality_lepton_count",
+                                    "count((lep_type==13 and lep_isMediumID and lep_isLooseIso) or (lep_type==11 and lep_isLooseID and lep_isLooseIso))",
+                                ],
+                                "operator": "==",
+                                "value": 4,
+                            },
+                            {
+                                "cut_id": "four_lepton_flavor_requirement",
+                                "variable_any_of": ["sum_lep_type", "sum(lep_type[0:4])"],
+                                "operator": "in_set",
+                                "value": [44, 48, 52],
+                            },
+                            {
+                                "cut_id": "total_charge_requirement",
+                                "variable_any_of": ["total_lepton_charge", "sum(lep_charge[0:4])"],
+                                "operator": "==",
+                                "value": 0,
+                            },
+                        ]
+                    },
+                    "score": 1.0,
+                }
+            ],
+        },
+    }
+    task = SimpleNamespace(
+        id="t005_hzz4l_l1",
+        type="hzz4l_l1",
+        level="l1",
+        spec_dir=str(task_dir),
+        submission_contract_path="submission_contract.yaml",
+    )
+
+    report = score_submission(task, submission_dir, rubric, {"status": "ok", "hard_checks_passed": True})
+
+    assert report["check_results"][0]["passed"]
+
+
 def test_stage_family_order_does_not_confuse_observable_and_spectrum_construction(tmp_path):
     task_dir = tmp_path / "task"
     submission_dir = tmp_path / "submission"
@@ -532,3 +710,419 @@ def test_mass_dependent_selection_accepts_pt_over_myy_wording(tmp_path):
     assert check["passed"]
     assert check["evidence"]["ratio_evidence"]
     assert check["evidence"]["positive_mass_window"]
+
+
+def test_l2_stage_families_are_inferred_from_semantic_trace_fields(tmp_path):
+    task_dir = tmp_path / "task"
+    submission_dir = tmp_path / "submission"
+    task_dir.mkdir()
+    submission_dir.mkdir()
+    contract = {
+        "version": 1,
+        "level": "l2",
+        "required_outputs": [
+            {"name": "submission_trace", "canonical_filename": "submission_trace.json", "type": "json"},
+            {"name": "interpretation", "canonical_filename": "interpretation.md", "type": "markdown"},
+        ],
+        "optional_outputs": [],
+        "schemas": {
+            "submission_trace.json": {"required_fields": ["workflow_stages"]},
+            "interpretation.md": {"constraints": {"non_empty": True}},
+        },
+    }
+    (task_dir / "submission_contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+    write_json(
+        submission_dir / "submission_trace.json",
+        {
+            "workflow_stages": [
+                {"stage_label": "manifest_ingest", "status": "completed"},
+                {"stage_label": "four_lepton_selection", "status": "completed"},
+                {"stage_label": "m4l_reconstruction_and_histogramming", "status": "completed"},
+                {"stage_label": "counting_window_excess_assessment", "status": "completed"},
+            ],
+            "scientific_decisions": [
+                "Kept data unweighted and weighted MC with mcWeight times scale factors times xsec*filteff*kfac*36.6 fb^-1 divided by sum_of_weights."
+            ],
+            "output_files_generated": ["four_lepton_mass_spectrum.json", "interpretation.md", "submission_trace.json"],
+        },
+    )
+    (submission_dir / "interpretation.md").write_text("Semantic stage fixture.", encoding="utf-8")
+    rubric = {
+        "version": 1,
+        "weights": {"pipeline": 1.0},
+        "checks": {
+            "pipeline": [
+                {
+                    "id": "families",
+                    "type": "structural",
+                    "condition": {
+                        "trace_stage_families_present": {
+                            "required_families": [
+                                "data_access",
+                                "object_or_event_selection",
+                                "observable_construction",
+                                "event_weighting",
+                                "spectrum_or_summary_construction",
+                                "inference_or_signal_localization",
+                                "interpretation",
+                            ],
+                            "minimum_pass_fraction": 0.75,
+                        }
+                    },
+                    "score": 0.5,
+                },
+                {
+                    "id": "order",
+                    "type": "structural",
+                    "condition": {
+                        "trace_stage_family_order": {
+                            "required_partial_orders": [
+                                {"before": "data_access", "after": "object_or_event_selection"},
+                                {"before": "object_or_event_selection", "after": "observable_construction"},
+                                {"before": "observable_construction", "after": "spectrum_or_summary_construction"},
+                                {"before": "event_weighting", "after": "spectrum_or_summary_construction"},
+                                {"before": "spectrum_or_summary_construction", "after": "inference_or_signal_localization"},
+                                {"before": "inference_or_signal_localization", "after": "interpretation"},
+                            ],
+                            "ignore_missing_families": True,
+                            "allow_same_stage": True,
+                        }
+                    },
+                    "score": 0.5,
+                },
+            ]
+        },
+    }
+    task = SimpleNamespace(
+        id="generic_l2",
+        type="hzz4l_l2",
+        level="l2",
+        spec_dir=str(task_dir),
+        submission_contract_path="submission_contract.yaml",
+    )
+
+    report = score_submission(task, submission_dir, rubric, {"status": "ok", "hard_checks_passed": True})
+
+    assert all(check["passed"] for check in report["check_results"])
+    families = report["check_results"][0]["evidence"]["families"]
+    assert "observable_construction" in families
+    assert "spectrum_or_summary_construction" in families
+    assert "inference_or_signal_localization" in families
+
+
+def test_l2_selection_and_weighting_accept_natural_language_evidence(tmp_path):
+    task_dir = tmp_path / "task"
+    submission_dir = tmp_path / "submission"
+    task_dir.mkdir()
+    submission_dir.mkdir()
+    contract = {
+        "version": 1,
+        "level": "l2",
+        "required_outputs": [
+            {"name": "submission_trace", "canonical_filename": "submission_trace.json", "type": "json"},
+            {"name": "interpretation", "canonical_filename": "interpretation.md", "type": "markdown"},
+        ],
+        "optional_outputs": [],
+        "schemas": {
+            "submission_trace.json": {"required_fields": ["scientific_decisions"]},
+            "interpretation.md": {"constraints": {"non_empty": True}},
+        },
+    }
+    (task_dir / "submission_contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+    write_json(
+        submission_dir / "submission_trace.json",
+        {
+            "scientific_decisions": [
+                "Applied trigger requirement trigE or trigM, total charge zero for the first four leptons, ordered pT thresholds of 25, 15, 10, and 7 GeV, and simple electron tight-ID / muon loose-isolation quality requirements.",
+                "Kept data unweighted and weighted MC with mcWeight times scale factors times xsec*filteff*kfac*36.6 fb^-1 divided by sum_of_weights.",
+            ],
+            "observable_constructed": {"name": "m4l from first four leptons"},
+        },
+    )
+    (submission_dir / "interpretation.md").write_text("Selection and weighting fixture.", encoding="utf-8")
+    rubric = {
+        "version": 1,
+        "weights": {"implementation": 1.0},
+        "checks": {
+            "implementation": [
+                {
+                    "id": "selection",
+                    "type": "structural",
+                    "condition": {
+                        "scientifically_valid_selection_evidence": {
+                            "required_component_groups": ["trigger", "kinematic", "object_quality", "isolation", "topology", "charge"],
+                            "minimum_groups": 5,
+                        }
+                    },
+                    "score": 0.5,
+                },
+                {
+                    "id": "weighting",
+                    "type": "structural",
+                    "condition": {
+                        "mc_weighting_strategy": {
+                            "data_policy": "unweighted",
+                            "mc_policy": "weighted_and_luminosity_normalized",
+                            "luminosity_fb_inv": 36.6,
+                            "required_mc_factors": [
+                                "sum_of_weights",
+                                "mcWeight",
+                                "xsec",
+                                "filteff",
+                                "kfac",
+                                "ScaleFactor_PILEUP",
+                                "ScaleFactor_ELE",
+                                "ScaleFactor_MUON",
+                                "ScaleFactor_LepTRIGGER",
+                            ],
+                        }
+                    },
+                    "score": 0.5,
+                },
+            ]
+        },
+    }
+    task = SimpleNamespace(
+        id="generic_l2",
+        type="hzz4l_l2",
+        level="l2",
+        spec_dir=str(task_dir),
+        submission_contract_path="submission_contract.yaml",
+    )
+
+    report = score_submission(task, submission_dir, rubric, {"status": "ok", "hard_checks_passed": True})
+
+    assert all(check["passed"] for check in report["check_results"])
+
+
+def test_validation_evidence_can_come_from_trace_validation_checks(tmp_path):
+    task_dir = tmp_path / "task"
+    submission_dir = tmp_path / "submission"
+    task_dir.mkdir()
+    submission_dir.mkdir()
+    contract = {
+        "version": 1,
+        "level": "l2",
+        "required_outputs": [
+            {"name": "submission_trace", "canonical_filename": "submission_trace.json", "type": "json"},
+            {"name": "interpretation", "canonical_filename": "interpretation.md", "type": "markdown"},
+        ],
+        "optional_outputs": [],
+        "schemas": {
+            "submission_trace.json": {"required_fields": ["validation_checks"]},
+            "interpretation.md": {"constraints": {"non_empty": True}},
+        },
+    }
+    (task_dir / "submission_contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+    write_json(
+        submission_dir / "submission_trace.json",
+        {
+            "validation_checks": [
+                {"check_id": "sideband_check", "result": "sidebands are consistent with the background trend."}
+            ]
+        },
+    )
+    (submission_dir / "interpretation.md").write_text("Validation fixture.", encoding="utf-8")
+    rubric = {
+        "version": 1,
+        "weights": {"validation": 1.0},
+        "checks": {
+            "validation": [
+                {
+                    "id": "validation",
+                    "type": "structural",
+                    "condition": {
+                        "validation_evidence_any": {
+                            "allowed_validation_types": ["sideband_check", "alternative_binning_check"],
+                            "minimum_count": 1,
+                        }
+                    },
+                    "score": 1.0,
+                }
+            ]
+        },
+    }
+    task = SimpleNamespace(
+        id="generic_l2",
+        type="hzz4l_l2",
+        level="l2",
+        spec_dir=str(task_dir),
+        submission_contract_path="submission_contract.yaml",
+    )
+
+    report = score_submission(task, submission_dir, rubric, {"status": "ok", "hard_checks_passed": True})
+
+    assert report["check_results"][0]["passed"]
+
+
+def test_artifact_window_consistency_rejects_high_significance_without_validation(tmp_path):
+    task_dir = tmp_path / "task"
+    submission_dir = tmp_path / "submission"
+    task_dir.mkdir()
+    submission_dir.mkdir()
+    contract = {
+        "version": 1,
+        "level": "l2",
+        "required_outputs": [
+            {"name": "spectrum", "canonical_filename": "spectrum.json", "type": "json"},
+            {"name": "summary", "canonical_filename": "summary.json", "type": "json"},
+            {"name": "submission_trace", "canonical_filename": "submission_trace.json", "type": "json"},
+            {"name": "interpretation", "canonical_filename": "interpretation.md", "type": "markdown"},
+        ],
+        "optional_outputs": [],
+        "schemas": {
+            "spectrum.json": {"required_fields": ["bin_edges", "data_counts", "total_background_counts"]},
+            "summary.json": {"required_fields": ["signal_region", "window_background_yield", "significance_proxy"]},
+            "submission_trace.json": {"required_fields": ["workflow_stages"]},
+            "interpretation.md": {"constraints": {"non_empty": True}},
+        },
+    }
+    (task_dir / "submission_contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+    write_json(
+        submission_dir / "spectrum.json",
+        {
+            "bin_edges": [120.0, 125.0, 130.0],
+            "data_counts": [43.0, 39.0],
+            "total_background_counts": [28.880309923717107, 1.281450367729235],
+            "signal_counts": [18.27265998763747, 13.3927022139031],
+        },
+    )
+    write_json(
+        submission_dir / "summary.json",
+        {
+            "signal_region": [120.0, 130.0],
+            "window_background_yield": 30.161760291446342,
+            "window_numerator_yield": 61.82712249298691,
+            "significance_proxy": 9.438911270197902,
+        },
+    )
+    write_json(submission_dir / "submission_trace.json", {"workflow_stages": [{"stage_label": "counting_window_excess_assessment"}]})
+    (submission_dir / "interpretation.md").write_text("A high-significance excess is claimed.", encoding="utf-8")
+    rubric = {
+        "version": 1,
+        "weights": {"analysis": 1.0},
+        "checks": {
+            "analysis": [
+                {
+                    "id": "window",
+                    "type": "deterministic",
+                    "condition": {
+                        "artifact_window_consistency": {
+                            "spectrum_file": "spectrum.json",
+                            "summary_file": "summary.json",
+                            "signal_region": [120.0, 130.0],
+                            "data_field": "data_counts",
+                            "background_field": "total_background_counts",
+                            "signal_field": "signal_counts",
+                            "summary_background_field": "window_background_yield",
+                            "summary_numerator_field": "window_numerator_yield",
+                            "summary_numerator_policy": "background_plus_signal",
+                            "significance_field": "significance_proxy",
+                            "validation_required_above_significance": 5.0,
+                        }
+                    },
+                    "score": 1.0,
+                }
+            ]
+        },
+    }
+    task = SimpleNamespace(
+        id="generic_l2",
+        type="hzz4l_l2",
+        level="l2",
+        spec_dir=str(task_dir),
+        submission_contract_path="submission_contract.yaml",
+    )
+
+    report = score_submission(task, submission_dir, rubric, {"status": "ok", "hard_checks_passed": True})
+
+    check = report["check_results"][0]
+    assert not check["passed"]
+    assert check["evidence"]["failures"][0]["reason"] == "high_significance_without_validation_evidence"
+
+
+def test_artifact_window_consistency_accepts_signal_template_significance_formula(tmp_path):
+    task_dir = tmp_path / "task"
+    submission_dir = tmp_path / "submission"
+    task_dir.mkdir()
+    submission_dir.mkdir()
+    contract = {
+        "version": 1,
+        "level": "l2",
+        "required_outputs": [
+            {"name": "spectrum", "canonical_filename": "spectrum.json", "type": "json"},
+            {"name": "summary", "canonical_filename": "summary.json", "type": "json"},
+            {"name": "submission_trace", "canonical_filename": "submission_trace.json", "type": "json"},
+            {"name": "interpretation", "canonical_filename": "interpretation.md", "type": "markdown"},
+        ],
+        "optional_outputs": [],
+        "schemas": {
+            "spectrum.json": {"required_fields": ["bin_edges", "data_counts", "total_background_counts", "signal_counts"]},
+            "summary.json": {"required_fields": ["signal_region", "window_background_yield", "window_numerator_yield", "significance_proxy"]},
+            "submission_trace.json": {"required_fields": ["workflow_stages"]},
+            "interpretation.md": {"constraints": {"non_empty": True}},
+        },
+    }
+    (task_dir / "submission_contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+    write_json(
+        submission_dir / "spectrum.json",
+        {
+            "bin_edges": [120.0, 125.0, 130.0],
+            "data_counts": [700.0, 819.0],
+            "total_background_counts": [95.55229949951172, 95.48033142089844],
+            "signal_counts": [14.569772720336914, 11.395055770874023],
+        },
+    )
+    write_json(
+        submission_dir / "summary.json",
+        {
+            "signal_region": [120.0, 130.0],
+            "window_background_yield": 191.03263092041016,
+            "window_numerator_yield": 216.9974594116211,
+            "significance_proxy": 1.8783848803250128,
+        },
+    )
+    write_json(submission_dir / "submission_trace.json", {"workflow_stages": [{"stage_label": "counting_window_excess_assessment"}]})
+    (submission_dir / "interpretation.md").write_text("Signal-template significance fixture.", encoding="utf-8")
+    rubric = {
+        "version": 1,
+        "weights": {"analysis": 1.0},
+        "checks": {
+            "analysis": [
+                {
+                    "id": "window",
+                    "type": "deterministic",
+                    "condition": {
+                        "artifact_window_consistency": {
+                            "spectrum_file": "spectrum.json",
+                            "summary_file": "summary.json",
+                            "signal_region": [120.0, 130.0],
+                            "data_field": "data_counts",
+                            "background_field": "total_background_counts",
+                            "signal_field": "signal_counts",
+                            "summary_background_field": "window_background_yield",
+                            "summary_numerator_field": "window_numerator_yield",
+                            "summary_numerator_policy": "background_plus_signal",
+                            "significance_field": "significance_proxy",
+                            "significance_formula": "numerator_minus_background_over_sqrt_background",
+                            "significance_absolute_tolerance": 0.01,
+                        }
+                    },
+                    "score": 1.0,
+                }
+            ]
+        },
+    }
+    task = SimpleNamespace(
+        id="generic_l2",
+        type="hzz4l_l2",
+        level="l2",
+        spec_dir=str(task_dir),
+        submission_contract_path="submission_contract.yaml",
+    )
+
+    report = score_submission(task, submission_dir, rubric, {"status": "ok", "hard_checks_passed": True})
+
+    check = report["check_results"][0]
+    assert check["passed"]
+    assert check["evidence"]["expected_significance"] == pytest.approx(1.878, abs=0.01)

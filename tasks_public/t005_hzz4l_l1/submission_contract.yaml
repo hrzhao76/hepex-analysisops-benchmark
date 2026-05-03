@@ -1,0 +1,121 @@
+version: 1
+level: l1
+required_outputs:
+- name: four_lepton_mass_spectrum
+  canonical_filename: four_lepton_mass_spectrum.json
+  type: json
+  machine_readable: true
+- name: four_lepton_inference_summary
+  canonical_filename: four_lepton_inference_summary.json
+  type: json
+  machine_readable: true
+- name: interpretation
+  canonical_filename: interpretation.md
+  type: markdown
+  machine_readable: false
+- name: submission_trace
+  canonical_filename: submission_trace.json
+  type: json
+  machine_readable: true
+optional_outputs: []
+schemas:
+  four_lepton_mass_spectrum.json:
+    required_fields:
+    - observable_name
+    - bin_edges_gev
+    - data_counts
+    - data_stat_uncertainty
+    - background_counts
+    - background_stat_uncertainty
+    - signal_counts
+    field_types:
+      observable_name: string
+      bin_edges_gev: array_float
+      data_counts: array_int
+      data_stat_uncertainty: array_number
+      background_counts: array_number
+      background_stat_uncertainty: array_number
+      signal_counts: array_number
+  four_lepton_inference_summary.json:
+    required_fields:
+    - region_of_interest_gev
+    - roi_background_yield
+    - roi_total_stacked_yield
+    - significance_proxy
+    - excess_observed
+    field_types:
+      region_of_interest_gev: array_float
+      roi_background_yield: float
+      roi_total_stacked_yield: float
+      significance_proxy: float
+      excess_observed: boolean
+  interpretation.md:
+    required_sections: []
+    constraints:
+      non_empty: true
+      min_characters: 20
+  submission_trace.json:
+    required_fields:
+    - workflow_stages
+    - baseline_assumptions_used
+    - input_samples_used
+    - cuts_applied
+    - observable_constructed
+    - fit_model_family_used
+    - validation_checks
+    - output_files_generated
+    field_types:
+      workflow_stages: array_object
+      baseline_assumptions_used: array_string
+      input_samples_used: array_object
+      cuts_applied: array_object
+      observable_constructed: object
+      fit_model_family_used: object
+      validation_checks: array_object
+      output_files_generated: array_string
+    nested_required_fields:
+      workflow_stages:
+        required_fields:
+        - stage_id
+        - status
+        - order_index
+        - depends_on
+      input_samples_used:
+        required_fields:
+        - sample_name
+        - sample_role
+        - files_used
+      cuts_applied:
+        required_fields:
+        - cut_id
+        - variable
+        - operator
+        - units
+        - value
+        - applied
+      observable_constructed:
+        required_fields:
+        - name
+        - inputs
+        - formula_summary
+      fit_model_family_used:
+        required_fields:
+        - signal
+        - background
+        - background_order
+        - fit_range_GeV
+      validation_checks:
+        required_fields:
+        - validation_type
+        - status
+        - result_summary
+    constraints:
+      output_files_generated:
+        min_length: 4
+        contains_all:
+        - four_lepton_mass_spectrum.json
+        - four_lepton_inference_summary.json
+        - interpretation.md
+        - submission_trace.json
+      workflow_stages:
+        min_length: 1
