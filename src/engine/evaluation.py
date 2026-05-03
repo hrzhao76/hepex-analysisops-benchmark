@@ -4,10 +4,16 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .contract_validator import validate_submission_dir
-from .l1_scorer import rubric_unavailable_report, score_submission
+from .rubric_scorer import rubric_unavailable_report, score_submission
 from .llm_judge import BaseJudge, get_judge
-from .package_loader import load_private_l1_rubric
+from .package_loader import load_private_rubric
 from .secret_store import SecretStore, patched_env
+
+
+SUPPORTED_EVALUATION_MODES = {
+    "directory_contract_and_private_l1",
+    "directory_contract_and_private_rubric_v1",
+}
 
 
 class EvaluationEngine:
@@ -33,7 +39,7 @@ class EvaluationEngine:
                 return self.fallback_judge
 
     def evaluate_submission(self, task: Any, submission_dir: Path) -> dict[str, Any]:
-        if getattr(task, "evaluation_mode", None) != "directory_contract_and_private_l1":
+        if getattr(task, "evaluation_mode", None) not in SUPPORTED_EVALUATION_MODES:
             raise RuntimeError(
                 f"Unsupported evaluation_mode for task {getattr(task, 'id', 'unknown')}: "
                 f"{getattr(task, 'evaluation_mode', None)}"
@@ -44,7 +50,7 @@ class EvaluationEngine:
             return contract_report
 
         secret_store = self.secret_store_factory()
-        private_rubric = load_private_l1_rubric(task, secret_store)
+        private_rubric = load_private_rubric(task, secret_store)
         if private_rubric:
             return score_submission(
                 task,

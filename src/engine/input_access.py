@@ -11,6 +11,62 @@ class InputAccessError(RuntimeError):
     pass
 
 
+def _template_context(task: TaskSpec) -> Dict[str, Any]:
+    return {
+        "task_id": task.id,
+        "task_type": task.type,
+        "level": getattr(task, "level", None) or "",
+        "release": getattr(task, "release", None) or "",
+        "dataset": getattr(task, "dataset", None) or "",
+        "skim": getattr(task, "skim", None) or "",
+        "sample": getattr(task, "skim", None) or "",
+        "protocol": getattr(task, "protocol", None) or "",
+    }
+
+
+def _render_template(value: str, context: Dict[str, Any], *, field_name: str, task_id: str) -> str:
+    try:
+        return value.format(**context)
+    except KeyError as exc:
+        missing = exc.args[0]
+        raise InputAccessError(
+            f"Task {task_id} {field_name} template references unknown field {{{missing}}}."
+        ) from exc
+
+
+def resolve_shared_input_paths(task: TaskSpec, cfg: GreenConfig) -> tuple[str, Path, Path]:
+    mode = cfg.input_access_mode
+    if not mode:
+        raise InputAccessError(
+            f"Task {task.id} requires large input data, but no input_access_mode was provided."
+        )
+    if mode == "scenario_shared_mount" and not getattr(task, "supports_scenario_shared_input", False):
+        raise InputAccessError(f"Task {task.id} does not support scenario_shared_mount.")
+    if mode == "local_shared_mount" and not getattr(task, "supports_local_shared_input", False):
+        raise InputAccessError(f"Task {task.id} does not support local_shared_mount.")
+    if not cfg.shared_input_dir:
+        raise InputAccessError(f"Task {task.id} requires shared_input_dir in runtime config.")
+
+    context = _template_context(task)
+    shared_input_dir = _render_template(
+        cfg.shared_input_dir,
+        context,
+        field_name="shared_input_dir",
+        task_id=task.id,
+    )
+    input_manifest_path = (
+        _render_template(
+            cfg.input_manifest_path,
+            context,
+            field_name="input_manifest_path",
+            task_id=task.id,
+        )
+        if cfg.input_manifest_path
+        else str(Path(shared_input_dir) / "input_manifest.json")
+    )
+    return mode, Path(shared_input_dir), Path(input_manifest_path)
+
+
 def resolve_input_access(task: TaskSpec, cfg: GreenConfig) -> Optional[Dict[str, Any]]:
     """Resolve static shared-input access for large-input tasks.
 
@@ -21,29 +77,7 @@ def resolve_input_access(task: TaskSpec, cfg: GreenConfig) -> Optional[Dict[str,
     if not getattr(task, "requires_large_input_data", False):
         return None
 
-    mode = cfg.input_access_mode
-    shared_input_dir = cfg.shared_input_dir
-    input_manifest_path = cfg.input_manifest_path
-
-    if not mode:
-        raise InputAccessError(
-            f"Task {task.id} requires large input data, but no input_access_mode was provided."
-        )
-    if mode == "scenario_shared_mount" and not getattr(task, "supports_scenario_shared_input", False):
-        raise InputAccessError(f"Task {task.id} does not support scenario_shared_mount.")
-    if mode == "local_shared_mount" and not getattr(task, "supports_local_shared_input", False):
-        raise InputAccessError(f"Task {task.id} does not support local_shared_mount.")
-    if not shared_input_dir:
-        raise InputAccessError(f"Task {task.id} requires shared_input_dir in runtime config.")
-    if not input_manifest_path:
-        raise InputAccessError(f"Task {task.id} requires input_manifest_path in runtime config.")
-    if cfg.allow_green_download:
-        raise InputAccessError(
-            "allow_green_download is not supported for shared-input tasks; "
-            "the shared mount must be provisioned by the scenario or local compose topology."
-        )
-
-    shared_dir = Path(shared_input_dir)
+    mode, shared_dir, manifest_path = resolve_shared_input_paths(task, cfg)
     if not shared_dir.exists() or not shared_dir.is_dir():
         raise InputAccessError(f"Shared input directory does not exist: {shared_dir}")
 
@@ -51,7 +85,7 @@ def resolve_input_access(task: TaskSpec, cfg: GreenConfig) -> Optional[Dict[str,
     for path in sorted(shared_dir.iterdir()):
         if not path.is_file():
             continue
-        if path.name == Path(input_manifest_path).name:
+        if path.name == manifest_path.name:
             continue
         if path.suffix.lower() != ".root":
             continue
@@ -60,10 +94,10 @@ def resolve_input_access(task: TaskSpec, cfg: GreenConfig) -> Optional[Dict[str,
                 "logical_name": path.name,
                 "path": str(path),
                 "size_bytes": path.stat().st_size,
+                "format": path.suffix.lower().lstrip(".") or "unknown",
             }
         )
 
-    manifest_path = Path(input_manifest_path)
     manifest = {
         "task_id": task.id,
         "release": getattr(task, "release", None),

@@ -92,7 +92,7 @@ async def test_benchmark_engine_real_mode_calls_solver_transport_with_contract(t
     assert payload["task_id"] == "t001_zpeak_fit"
     assert payload["solver_backend"] == "agent_1_oh"
     assert payload["constraints"]["response_format"] == "submission_bundle_v1"
-    assert payload["constraints"]["solver_backend"] == "agent_1_oh"
+    assert "solver_backend" not in payload["constraints"]
     assert payload["submission_contract"]["required_outputs"][0]["canonical_filename"] == "fit_summary.json"
     assert payload["data"]["work_dir"].endswith("/t001_zpeak_fit/solver_work")
     assert payload["data"]["output_dir"] == payload["data"]["work_dir"]
@@ -116,7 +116,7 @@ async def test_benchmark_engine_passes_solver_backend_from_eval_request(tmp_path
 
     payload = transport.payloads[0]
     assert payload["solver_backend"] == "agent_2_xxx"
-    assert payload["constraints"]["solver_backend"] == "agent_2_xxx"
+    assert "solver_backend" not in payload["constraints"]
     assert any("Solver backend default: agent_2_xxx" in status for status in observer.statuses)
 
 
@@ -139,6 +139,36 @@ async def test_benchmark_engine_accepts_top_level_solver_backend(tmp_path):
     await engine.run(request, transport, observer)
 
     assert transport.payloads[0]["solver_backend"] == "agent_2_top"
+
+
+@pytest.mark.asyncio
+async def test_persisted_payloads_do_not_emit_redundant_null_or_solver_backend_fields(tmp_path):
+    engine = BenchmarkEngine()
+    observer = FakeObserver()
+    transport = FakeTransport()
+    request = eval_request(
+        {
+            "data_dir": str(tmp_path / "data"),
+            "task_dirs": [str(ZPEAK_TASK_DIR)],
+            "solver_backend": "agent_1_oh",
+            "task_overrides": {"t001_zpeak_fit": {"mode": "call_white", "solver_backend": None}},
+        }
+    )
+
+    result = await engine.run(request, transport, observer)
+
+    run_dir = Path(result.overall["run_dir"])
+    eval_payload = json.loads((run_dir / "eval_request.json").read_text(encoding="utf-8"))
+    green_config = json.loads((run_dir / "green_config.json").read_text(encoding="utf-8"))
+    judge_input = json.loads((run_dir / "t001_zpeak_fit" / "judge_input.json").read_text(encoding="utf-8"))
+    purple_request = json.loads((run_dir / "t001_zpeak_fit" / "purple_request.json").read_text(encoding="utf-8"))
+
+    assert eval_payload["config"]["solver_backend"] == "agent_1_oh"
+    assert "solver_backend" not in eval_payload
+    assert "solver_backend" not in green_config["task_overrides"]["t001_zpeak_fit"]
+    assert "solver_backend" not in judge_input["task_spec"]
+    assert purple_request["solver_backend"] == "agent_1_oh"
+    assert "solver_backend" not in purple_request["constraints"]
 
 
 @pytest.mark.asyncio

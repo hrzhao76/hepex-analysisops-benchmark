@@ -1,25 +1,25 @@
-id: t002_hyy_v5_l1
-type: hyy_l1
-level: l1
+id: t004_hyy_v5_l3
+type: hyy_l3
+level: l3
 mode: call_white
 
 needs_data: true
 release: 2025e-13tev-beta
 dataset: data
 skim: GamGam
-max_files: 1
+max_files: 5
 
 requires_large_input_data: true
 supports_scenario_shared_input: true
 supports_local_shared_input: true
-input_strategy: download
+input_strategy: shared_manifest
 solver_response_mode: submission_bundle_v1
 evaluation_mode: directory_contract_and_private_rubric_v1
 
 solver_prompt_path: solver_prompt.md
 submission_contract_path: submission_contract.yaml
 
-description: "Rediscover the Higgs boson in the diphoton channel using the finetuned L1 package."
+description: "Open-scientific-discovery Hyy L3 task: design a defensible diphoton signal-search strategy and report evidence for or against a Higgs-like excess."
 constraints:
   response_format: submission_bundle_v1
-  allow_purple_network: true
+  allow_purple_network: false

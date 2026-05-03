@@ -1,0 +1,26 @@
+schema_version: 1
+kind: task_spec
+description: Public task specification accepted by the benchmark runtime.
+required_identity:
+  any_of:
+    - id
+    - task.id
+allowed_modes:
+  - mock
+  - call_white
+allowed_input_strategies:
+  - download
+  - shared_manifest
+allowed_solver_response_modes:
+  - submission_bundle_v1
+allowed_evaluation_modes:
+  - directory_contract_and_private_l1
+  - directory_contract_and_private_rubric_v1
+compatibility:
+  legacy_data_fields:
+    - release
+    - dataset
+    - skim
+    - protocol
+    - max_files
+  generic_data_field: input_requirements

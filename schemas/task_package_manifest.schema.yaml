@@ -1,0 +1,23 @@
+schema_version: 1
+kind: task_package_manifest
+description: Provenance, versioning, and file-hash manifest for one task package.
+required_fields:
+  - schema_version
+  - package_id
+  - task_id
+  - source
+  - status
+  - schema_versions
+  - files
+allowed_sources:
+  - manual
+  - generated
+  - curated
+  - published
+allowed_statuses:
+  - draft
+  - curated
+  - published
+file_groups:
+  - public
+  - private

@@ -9,12 +9,13 @@ import yaml
 
 from a2a.utils import new_agent_text_message
 
-from agent import Agent
+from agent import Agent, AgentSolverTransport
 from engine.benchmark_engine import BenchmarkEngine
 from engine.contract_validator import validate_submission_dir
 from engine.evaluation import EvaluationEngine
 from engine.input_access import InputAccessError, resolve_input_access
 from engine.package_loader import load_private_l1_rubric, load_submission_contract
+from engine.run_models import EvalRequest
 from engine.secret_store import SecretStore
 from engine.submission_bundle import SubmissionBundleError, parse_submission_bundle
 from tasks.task_spec import GreenConfig, load_task_spec
@@ -146,7 +147,7 @@ def canonical_hyy_task(**updates):
         "supports_local_shared_input": True,
         "input_strategy": "shared_manifest",
         "solver_response_mode": "submission_bundle_v1",
-        "evaluation_mode": "directory_contract_and_private_l1",
+        "evaluation_mode": "directory_contract_and_private_rubric_v1",
     }
     canonical.update(updates)
     return task.model_copy(update=canonical)
@@ -157,14 +158,14 @@ def test_public_tasks_use_bundle_directory_contract(task_dir):
     task = load_task_spec(task_dir)
     assert task.input_strategy == "download"
     assert task.solver_response_mode == "submission_bundle_v1"
-    assert task.evaluation_mode == "directory_contract_and_private_l1"
+    assert task.evaluation_mode == "directory_contract_and_private_rubric_v1"
 
 
 def test_task_spec_capability_overrides_for_hyy_task():
     task = canonical_hyy_task()
     assert task.input_strategy == "shared_manifest"
     assert task.solver_response_mode == "submission_bundle_v1"
-    assert task.evaluation_mode == "directory_contract_and_private_l1"
+    assert task.evaluation_mode == "directory_contract_and_private_rubric_v1"
 
 
 class DummyUpdater:
@@ -226,6 +227,29 @@ def test_resolve_input_access_requires_static_mount(tmp_path):
     cfg = GreenConfig(task_dirs=[str(TASK_DIR)])
     with pytest.raises(InputAccessError):
         resolve_input_access(task, cfg)
+
+
+def test_resolve_input_access_allows_green_download_and_filters_non_root(tmp_path):
+    task = canonical_hyy_task(max_files=2)
+    shared_input = tmp_path / "2025e-13tev-beta" / "data" / "GamGam"
+    shared_input.mkdir(parents=True)
+    (shared_input / "events_a.root").write_text("placeholder", encoding="utf-8")
+    (shared_input / "events_b.root").write_text("placeholder", encoding="utf-8")
+    (shared_input / "green_download_manifest.json").write_text("{}", encoding="utf-8")
+    cfg = GreenConfig(
+        task_dirs=[str(TASK_DIR)],
+        input_access_mode="local_shared_mount",
+        shared_input_dir=str(tmp_path / "{release}" / "{dataset}" / "{skim}"),
+        allow_green_download=True,
+    )
+
+    manifest = resolve_input_access(task, cfg)
+
+    assert manifest is not None
+    assert manifest["shared_input_dir"] == str(shared_input)
+    assert manifest["input_manifest_path"] == str(shared_input / "input_manifest.json")
+    assert [item["logical_name"] for item in manifest["files"]] == ["events_a.root", "events_b.root"]
+    assert (shared_input / "input_manifest.json").exists()
 
 
 def test_validate_task_capabilities_rejects_missing_contract_for_bundle_mode(tmp_path):
@@ -746,3 +770,87 @@ async def test_agent_routes_by_capability_not_task_id(monkeypatch, tmp_path):
 
     assert updater.rejected is None
     assert captured == {"prepare": 1, "bundle": 1, "eval": 1}
+
+
+@pytest.mark.asyncio
+async def test_green_managed_download_populates_shared_manifest(monkeypatch, tmp_path):
+    task = canonical_hyy_task(max_files=2)
+    shared_input = tmp_path / "shared_input" / "2025e-13tev-beta" / "data" / "GamGam"
+    task_eval_dir = tmp_path / "task_eval"
+    cfg = GreenConfig(
+        task_dirs=[str(TASK_DIR)],
+        input_access_mode="local_shared_mount",
+        shared_input_dir=str(tmp_path / "shared_input" / "{release}" / "{dataset}" / "{skim}"),
+        allow_green_download=True,
+    )
+
+    def fake_ensure_downloaded(**kwargs):
+        assert kwargs["skim"] == "GamGam"
+        assert kwargs["max_files"] == 2
+        output_dir = Path(kwargs["output_dir"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "events_a.root").write_text("placeholder", encoding="utf-8")
+        (output_dir / "events_b.root").write_text("placeholder", encoding="utf-8")
+        (output_dir / "notes.txt").write_text("not input", encoding="utf-8")
+        return {
+            "release": kwargs["release"],
+            "dataset": kwargs["dataset"],
+            "skim": kwargs["skim"],
+            "protocol": kwargs["protocol"],
+            "output_dir": str(output_dir),
+            "n_requested": 2,
+            "n_ok": 2,
+            "n_fail": 0,
+            "local_paths": [str(output_dir / "events_a.root"), str(output_dir / "events_b.root")],
+            "results": [],
+            "raw_urls": [],
+        }
+
+    class Observer:
+        def __init__(self):
+            self.statuses = []
+
+        async def status(self, text):
+            self.statuses.append(text)
+
+    monkeypatch.setattr("engine.benchmark_engine.ensure_atlas_open_data_downloaded", fake_ensure_downloaded)
+
+    observer = Observer()
+    engine = BenchmarkEngine()
+    data_info, manifest = await engine._prepare_task_input(task, cfg, task_eval_dir, observer)
+
+    assert data_info is not None
+    assert manifest is not None
+    assert data_info["download_managed_by"] == "green"
+    assert data_info["download_summary"]["n_ok"] == 2
+    assert data_info["n_files"] == 2
+    assert data_info["shared_input_dir"] == str(shared_input)
+    assert data_info["input_manifest_path"] == str(shared_input / "input_manifest.json")
+    assert [item["logical_name"] for item in manifest["files"]] == ["events_a.root", "events_b.root"]
+    assert (shared_input / "input_manifest.json").exists()
+    assert (shared_input / "green_download_manifest.json").exists()
+    assert (task_eval_dir / "green_download_manifest.json").exists()
+    assert any("Green downloading shared input" in status for status in observer.statuses)
+
+
+@pytest.mark.asyncio
+async def test_agent_solver_transport_uses_configured_timeout():
+    captured = {}
+
+    class Messenger:
+        async def talk_to_agent(self, **kwargs):
+            captured.update(kwargs)
+            return "{}"
+
+    request = EvalRequest.model_validate(
+        {
+            "participants": {"purple_agent": "http://example.com"},
+            "config": {"solver_request_timeout_seconds": 1800},
+        }
+    )
+    transport = AgentSolverTransport(messenger=Messenger(), request=request)
+
+    await transport.request_submission_bundle({"status": "test"})
+
+    assert captured["timeout"] == 1800
+    assert captured["new_conversation"] is True

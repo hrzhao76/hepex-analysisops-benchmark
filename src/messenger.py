@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from uuid import uuid4
 
 import httpx
@@ -18,7 +19,15 @@ from a2a.types import (
 )
 
 
-DEFAULT_TIMEOUT = 300
+def _default_timeout_seconds() -> int:
+    raw = os.environ.get("A2A_CLIENT_TIMEOUT_SECONDS", "900")
+    try:
+        return int(raw)
+    except ValueError:
+        return 900
+
+
+DEFAULT_TIMEOUT = _default_timeout_seconds()
 
 
 def create_message(

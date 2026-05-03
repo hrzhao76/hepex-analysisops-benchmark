@@ -17,7 +17,7 @@ reuse_existing: true
 solver_prompt_path: solver_prompt.md
 input_strategy: download
 solver_response_mode: submission_bundle_v1
-evaluation_mode: directory_contract_and_private_l1
+evaluation_mode: directory_contract_and_private_rubric_v1
 
 description: "Build m_mumu and fit around Z peak."
 constraints:

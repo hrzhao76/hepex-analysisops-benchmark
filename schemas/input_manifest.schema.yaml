@@ -1,0 +1,15 @@
+schema_version: 1
+kind: input_manifest
+description: Runtime-readable input data manifest.
+required_fields:
+  - task_id
+  - files
+file_entry_required_fields:
+  - logical_name
+  - path
+optional_file_entry_fields:
+  - size_bytes
+  - format
+  - source
+  - checksum
+  - metadata
