@@ -34,11 +34,20 @@ class AgentSolverTransport:
             return str(next(iter(request.participants.values())))
         raise KeyError("Missing participant role: expected 'purple_agent'.")
 
+    def _solver_request_timeout_seconds(self) -> int | None:
+        raw = self.request.config.get("solver_request_timeout_seconds")
+        if raw is None:
+            return None
+        return int(raw)
+
     async def request_submission_bundle(self, payload: dict[str, Any]) -> str:
+        timeout = self._solver_request_timeout_seconds()
+        kwargs = {"timeout": timeout} if timeout is not None else {}
         return await self.messenger.talk_to_agent(
             message=json.dumps(payload, indent=2),
             url=self._resolve_purple_agent_url(self.request),
             new_conversation=True,
+            **kwargs,
         )
 
 

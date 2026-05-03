@@ -97,6 +97,7 @@ class GreenConfig(BaseModel):
     shared_input_dir: Optional[str] = None
     input_manifest_path: Optional[str] = None
     allow_green_download: bool = False
+    solver_request_timeout_seconds: Optional[int] = Field(default=None, ge=1)
     persist_payloads: bool = True
     task_overrides: dict[str, TaskRuntimeOverride] = Field(default_factory=dict)
 

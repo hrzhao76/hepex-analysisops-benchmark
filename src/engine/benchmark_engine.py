@@ -9,10 +9,11 @@ from typing import Any, Optional, Protocol
 
 from tasks.task_spec import GreenConfig, TaskRuntimeOverride, TaskSpec, load_task_spec
 from utils import _new_run_id, _safe_write_json, _safe_write_text, _utc_now_iso
+from utils.atlas_download import ensure_atlas_open_data_downloaded
 from utils.mock_traces import get_mock_bundle
 
 from .evaluation import EvaluationEngine
-from .input_access import InputAccessError, resolve_input_access
+from .input_access import InputAccessError, resolve_input_access, resolve_shared_input_paths
 from .package_loader import load_solver_prompt, load_submission_contract
 from .prompt_render import _builtin_minimal_prompt
 from .run_models import EvalRequest
@@ -80,7 +81,89 @@ class BenchmarkEngine:
 
     @staticmethod
     def _has_runtime_shared_input(cfg: GreenConfig) -> bool:
-        return bool(cfg.input_access_mode and cfg.shared_input_dir and cfg.input_manifest_path)
+        return bool(cfg.input_access_mode and cfg.shared_input_dir)
+
+    @staticmethod
+    def _shared_root_files(shared_dir: Path | None) -> list[Path]:
+        if shared_dir is None:
+            return []
+        if not shared_dir.exists() or not shared_dir.is_dir():
+            return []
+        return sorted(path for path in shared_dir.iterdir() if path.is_file() and path.suffix.lower() == ".root")
+
+    @staticmethod
+    def _green_download_summary(download_info: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+        if download_info is None:
+            return None
+        keys = [
+            "download_skipped",
+            "reason",
+            "release",
+            "dataset",
+            "skim",
+            "protocol",
+            "output_dir",
+            "n_requested",
+            "n_ok",
+            "n_fail",
+            "n_existing_root_files",
+        ]
+        return {key: download_info[key] for key in keys if key in download_info}
+
+    async def _ensure_green_shared_input(
+        self,
+        task: TaskSpec,
+        cfg: GreenConfig,
+        task_eval_dir: Path,
+        observer: RunObserver,
+    ) -> Optional[dict[str, Any]]:
+        if not cfg.allow_green_download:
+            return None
+        if not getattr(task, "skim", None):
+            raise InputAccessError(f"Task {task.id} requested Green-managed download but no skim/sample is configured.")
+
+        _, shared_dir, _ = resolve_shared_input_paths(task, cfg)
+        existing_roots = self._shared_root_files(shared_dir)
+        requested_files = getattr(task, "max_files", 0) or 0
+        enough_existing = bool(existing_roots) and (requested_files <= 0 or len(existing_roots) >= requested_files)
+        if getattr(task, "reuse_existing", True) and enough_existing:
+            return {
+                "download_skipped": True,
+                "reason": "shared_input_already_has_enough_root_files",
+                "n_existing_root_files": len(existing_roots),
+                "output_dir": str(shared_dir),
+            }
+
+        await observer.status(
+            (
+                f"[{task.id}] Green downloading shared input: "
+                f"{task.release}/{task.dataset}/{task.skim} (max_files={requested_files})."
+            )
+        )
+        workers = int(os.environ.get("HEPEX_GREEN_DOWNLOAD_WORKERS", "6"))
+        download_info = ensure_atlas_open_data_downloaded(
+            skim=str(task.skim),
+            release=task.release,
+            dataset=task.dataset,
+            protocol=task.protocol,
+            output_dir=str(shared_dir),
+            max_files=requested_files,
+            workers=workers,
+            verbose=True,
+        )
+        _safe_write_json(shared_dir / "green_download_manifest.json", download_info)
+        _safe_write_json(task_eval_dir / "green_download_manifest.json", download_info)
+
+        if int(download_info.get("n_requested") or 0) <= 0:
+            raise InputAccessError(f"Green downloader found no input files for task {task.id}.")
+        if int(download_info.get("n_ok") or 0) <= 0 or int(download_info.get("n_fail") or 0) > 0:
+            raise InputAccessError(
+                (
+                    f"Green downloader failed for task {task.id}: "
+                    f"n_ok={download_info.get('n_ok')} n_fail={download_info.get('n_fail')}."
+                )
+            )
+        return download_info
 
     @staticmethod
     def _extract_json_from_response(text: str) -> str:
@@ -232,8 +315,10 @@ class BenchmarkEngine:
 
         if task.input_strategy == "shared_manifest":
             if self._has_runtime_shared_input(cfg):
+                download_info = await self._ensure_green_shared_input(task, cfg, task_eval_dir, observer)
                 input_manifest = resolve_input_access(task, cfg)
             elif getattr(task, "mode", "mock") == "mock":
+                download_info = None
                 input_manifest = self._build_mock_input_manifest(task, task_eval_dir)
             else:
                 raise InputAccessError(
@@ -243,7 +328,11 @@ class BenchmarkEngine:
                 "shared_input_dir": input_manifest.get("shared_input_dir"),
                 "input_manifest_path": input_manifest.get("input_manifest_path"),
                 "n_files": len(input_manifest.get("files", [])),
+                "download_managed_by": "green" if cfg.allow_green_download else "scenario",
             }
+            download_summary = self._green_download_summary(download_info)
+            if download_summary is not None:
+                data_info["download_summary"] = download_summary
             _safe_write_json(task_eval_dir / "data_info.json", data_info)
             await observer.status(f"[{task.id}] Shared input ready: {data_info['n_files']} files.")
             return data_info, input_manifest

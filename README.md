@@ -156,8 +156,7 @@ Full local shared-data request:
     "task_dirs": ["tasks_public/t002_hyy_v5_l1"],
     "data_dir": "/home/agent/output",
     "input_access_mode": "local_shared_mount",
-    "shared_input_dir": "/shared/hepex/input/2025e-13tev-beta/data/GamGam",
-    "input_manifest_path": "/shared/hepex/input/2025e-13tev-beta/data/GamGam/input_manifest.json",
+    "shared_input_dir": "/shared/hepex/input/{release}/{dataset}/{skim}",
     "allow_green_download": false,
     "task_overrides": {
       "t002_hyy_v5_l1": {
