@@ -38,19 +38,43 @@ schemas:
       total_background_counts: array_number
       total_background_uncertainty: array_number
       signal_counts: array_number
+    constraints:
+      array_alignment:
+      - fields:
+        - bin_edges
+        - data_counts
+        relation: edges_equals_counts_plus_one
+      - fields:
+        - data_counts
+        - total_background_counts
+        relation: same_length
+      - fields:
+        - data_counts
+        - total_background_uncertainty
+        relation: same_length
+      - fields:
+        - data_counts
+        - signal_counts
+        relation: same_length
   four_lepton_excess_summary.json:
     required_fields:
     - method_type
     - signal_region
+    - window_observed_yield
     - window_background_yield
+    - window_signal_yield
     - window_numerator_yield
     - significance_proxy
+    - significance_formula
     field_types:
       method_type: string
-      signal_region: array_float
+      signal_region: array_float_len_2
+      window_observed_yield: float
       window_background_yield: float
+      window_signal_yield: float
       window_numerator_yield: float
       significance_proxy: float
+      significance_formula: string
   interpretation.md:
     required_sections: []
     constraints:
@@ -62,23 +86,45 @@ schemas:
   submission_trace.json:
     required_fields:
     - workflow_stages
+    - execution_evidence
     - scientific_decisions
     - input_samples_used
+    - validation_checks
     - observable_constructed
     - inference_strategy
     - output_files_generated
     field_types:
       workflow_stages: array_object
-      scientific_decisions: array_string
+      execution_evidence: object
+      scientific_decisions: array_object
       observable_constructed: object
       inference_strategy: object
       output_files_generated: array_string
       input_samples_used: array_object
+      validation_checks: array_object
     nested_required_fields:
       workflow_stages:
         required_fields:
         - stage_label
         - status
+      execution_evidence:
+        required_fields:
+        - files_processed_count
+        - events_processed_total
+        - selected_events_total
+        - candidates_built_total
+        - histogram_filled_entries
+        field_types:
+          files_processed_count: integer
+          events_processed_total: integer
+          selected_events_total: integer
+          candidates_built_total: integer
+          histogram_filled_entries: integer
+      scientific_decisions:
+        required_fields:
+        - decision
+        - reason
+        - impact_on_analysis
       observable_constructed:
         required_fields:
         - name
@@ -90,6 +136,11 @@ schemas:
         - sample_name
         - sample_role
         - files_used
+      validation_checks:
+        required_fields:
+        - validation_type
+        - status
+        - result_summary
     constraints:
       output_files_generated:
         min_length: 4

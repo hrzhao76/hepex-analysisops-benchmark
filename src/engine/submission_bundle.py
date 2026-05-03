@@ -48,6 +48,10 @@ def parse_submission_bundle(bundle: Dict[str, Any], contract: Dict[str, Any]) ->
             f"Submission bundle is too large ({bundle_size} bytes); submission_bundle_v1 is for small structured outputs only."
         )
 
+    if bundle.get("status") == "error":
+        message = bundle.get("error") or bundle.get("message") or "Solver reported top-level status=error."
+        raise SubmissionBundleError(str(message))
+
     artifacts = bundle.get("artifacts")
     if not isinstance(artifacts, dict):
         raise SubmissionBundleError("submission_bundle_v1 requires an 'artifacts' object.")
