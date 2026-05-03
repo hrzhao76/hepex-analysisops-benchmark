@@ -3,11 +3,11 @@ name: Test and Publish Agent
 on:
   workflow_dispatch:
   pull_request:
-  # push:
-  #   branches:
-  #     - master
-  #   tags:
-  #     - 'v*'  # Trigger on version tags like v1.0.0, v1.1.0
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0, v1.1.0
 
 jobs:
   test-and-publish:
@@ -31,8 +31,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}
+            type=raw,value=0.1.0
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build Docker image
