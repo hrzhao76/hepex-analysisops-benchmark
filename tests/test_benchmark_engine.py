@@ -50,7 +50,9 @@ def eval_request(config: dict) -> EvalRequest:
 
 
 @pytest.mark.asyncio
-async def test_benchmark_engine_mock_run_materializes_public_bundle(tmp_path):
+async def test_benchmark_engine_mock_run_materializes_public_bundle(tmp_path, monkeypatch):
+    monkeypatch.delenv("HEPEX_JUDGE_PROVIDER", raising=False)
+    monkeypatch.delenv("HEPEX_OPENAI_MODEL", raising=False)
     engine = BenchmarkEngine()
     observer = FakeObserver()
     request = eval_request(
@@ -70,9 +72,20 @@ async def test_benchmark_engine_mock_run_materializes_public_bundle(tmp_path):
     run_summary = json.loads((Path(result.overall["run_dir"]) / "run_summary.json").read_text(encoding="utf-8"))
     assert run_summary == result.overall
     assert result.overall["score_total"] == 1.0
+    assert result.overall["llm"]["judge"]["configured"] == {"provider": "openai", "model": "gpt-5"}
+    assert result.overall["llm"]["solver"]["configured"] == {
+        "backend": "agent_1_oh",
+        "model": "gpt-5",
+        "source": "default",
+    }
     assert observer.task_results[0][0] == "Result-t001_zpeak_fit"
     task_report = observer.task_results[0][2]
     assert task_report["solver_backend"] == "agent_1_oh"
+    assert task_report["llm"]["solver"]["configured"] == {
+        "backend": "agent_1_oh",
+        "model": "gpt-5",
+        "source": "default",
+    }
     assert task_report["purple_agent_runtime_seconds"] is None
     assert task_report["timing"]["purple_agent_used"] is False
     assert task_report["timing"]["task_runtime_seconds"] >= 0.0
@@ -97,6 +110,7 @@ async def test_benchmark_engine_real_mode_calls_solver_transport_with_contract(t
     payload = transport.payloads[0]
     assert payload["task_id"] == "t001_zpeak_fit"
     assert payload["solver_backend"] == "agent_1_oh"
+    assert payload["solver_model"] == "gpt-5"
     assert payload["constraints"]["response_format"] == "submission_bundle_v1"
     assert "solver_backend" not in payload["constraints"]
     assert payload["submission_contract"]["required_outputs"][0]["canonical_filename"] == "fit_summary.json"
@@ -149,7 +163,13 @@ async def test_benchmark_engine_passes_solver_backend_from_eval_request(tmp_path
 
     payload = transport.payloads[0]
     assert payload["solver_backend"] == "agent_2_xxx"
+    assert payload["solver_model"] == "gpt-5"
     assert "solver_backend" not in payload["constraints"]
+    assert observer.task_results[0][2]["llm"]["solver"]["configured"] == {
+        "backend": "agent_2_xxx",
+        "model": "gpt-5",
+        "source": "default",
+    }
     assert any("Solver backend default: agent_2_xxx" in status for status in observer.statuses)
 
 

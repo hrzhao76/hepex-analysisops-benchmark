@@ -597,7 +597,7 @@ async def test_agent_skips_task_when_override_disables_it(monkeypatch, tmp_path)
 
     summary_artifacts = [artifact for artifact in updater.artifacts if artifact[0] == "Summary"]
     assert len(summary_artifacts) == 1
-    assert len(summary_artifacts[0][1]) == 1
+    assert len(summary_artifacts[0][1]) == 2
     assert "Done." in summary_artifacts[0][1][0].root.text
 
     summary_payload = json.loads((run_dirs[0] / "run_summary.json").read_text(encoding="utf-8"))
@@ -730,9 +730,19 @@ async def test_agent_routes_by_capability_not_task_id(monkeypatch, tmp_path):
             },
         )
 
-    async def fake_bundle(self, task, task_eval_dir, input_manifest, persist_payloads, solver_transport, solver_backend):
+    async def fake_bundle(
+        self,
+        task,
+        task_eval_dir,
+        input_manifest,
+        persist_payloads,
+        solver_transport,
+        solver_backend,
+        solver_model,
+    ):
         captured["bundle"] += 1
         assert solver_backend == "agent_1_oh"
+        assert solver_model == "gpt-5"
         submission_trace = sample_submission_bundle()["artifacts"]["submission_trace.json"]
         (task_eval_dir / "submission_trace.json").write_text(json.dumps(submission_trace), encoding="utf-8")
         return {"submission_trace": submission_trace}

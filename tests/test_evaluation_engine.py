@@ -71,7 +71,9 @@ def test_evaluation_engine_returns_public_only_when_private_rubric_missing(tmp_p
     assert report["final"]["normalized_score"] == 1.0
 
 
-def test_evaluation_engine_returns_hidden_score_with_private_rubric(tmp_path):
+def test_evaluation_engine_returns_hidden_score_with_private_rubric(tmp_path, monkeypatch):
+    monkeypatch.delenv("HEPEX_JUDGE_PROVIDER", raising=False)
+    monkeypatch.delenv("HEPEX_OPENAI_MODEL", raising=False)
     task = load_task_spec(HYY_TASK_DIR)
     materialize_bundle(get_mock_bundle(task.type, task.id), tmp_path)
 
@@ -82,6 +84,7 @@ def test_evaluation_engine_returns_hidden_score_with_private_rubric(tmp_path):
     assert report["score_visibility"] == "official_with_hidden"
     assert report["hidden_scores"]["status"] == "ok"
     assert report["final"]["normalized_score"] == pytest.approx(0.9)
+    assert report["llm"]["judge"]["configured"] == {"provider": "openai", "model": "gpt-5"}
 
 
 def test_evaluation_engine_preserves_interpretation_text_for_llm_judge(tmp_path):
@@ -108,6 +111,7 @@ def test_evaluation_engine_preserves_interpretation_text_for_llm_judge(tmp_path)
 
     reasoning = [check for check in report["check_results"] if check["id"] == "interpretation_logically_consistent"][0]
     assert reasoning["passed"] is True
+    assert report["llm"]["judge"]["runtime"]["available"] is True
     assert report["final"]["normalized_score"] == pytest.approx(1.0)
 
 

@@ -59,7 +59,13 @@ async def test_agent_runs_public_mock_tasks(monkeypatch, tmp_path):
     assert "Result-t002_hyy_v5_l1" in names
     assert "Summary" in names
     summary_artifact = [artifact for artifact in updater.artifacts if artifact[0] == "Summary"][0]
-    assert len(summary_artifact[1]) == 1
+    assert len(summary_artifact[1]) == 2
+    summary_payload = summary_artifact[1][1].root.data
+    assert summary_payload["llm"]["solver"]["configured"] == {
+        "backend": "agent_1_oh",
+        "model": "gpt-5",
+        "source": "default",
+    }
 
     data_payloads = [
         part.root.data
@@ -67,11 +73,13 @@ async def test_agent_runs_public_mock_tasks(monkeypatch, tmp_path):
         for part in parts
         if isinstance(part.root, DataPart)
     ]
-    assert {payload.get("task_id") for payload in data_payloads} == {"t001_zpeak_fit", "t002_hyy_v5_l1"}
-    assert all("tasks" not in payload for payload in data_payloads)
-    assert all(payload.get("solver_backend") == "agent_1_oh" for payload in data_payloads)
-    assert all("purple_agent_runtime_seconds" in payload for payload in data_payloads)
-    assert all(payload.get("timing", {}).get("purple_agent_used") is False for payload in data_payloads)
+    task_payloads = [payload for payload in data_payloads if payload.get("task_id")]
+    assert {payload.get("task_id") for payload in task_payloads} == {"t001_zpeak_fit", "t002_hyy_v5_l1"}
+    assert all("tasks" not in payload for payload in task_payloads)
+    assert all(payload.get("solver_backend") == "agent_1_oh" for payload in task_payloads)
+    assert all(payload["llm"]["solver"]["configured"]["model"] == "gpt-5" for payload in task_payloads)
+    assert all("purple_agent_runtime_seconds" in payload for payload in task_payloads)
+    assert all(payload.get("timing", {}).get("purple_agent_used") is False for payload in task_payloads)
 
     run_dirs = list((tmp_path / "data" / "runs").iterdir())
     assert len(run_dirs) == 1

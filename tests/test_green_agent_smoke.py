@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from a2a.types import DataPart
 from a2a.utils import new_agent_text_message
 
 from agent import Agent
@@ -47,7 +48,9 @@ async def test_green_agent_public_task_smoke(tmp_path):
     assert updater.rejected is None
     summary_artifacts = [artifact for artifact in updater.artifacts if artifact[0] == "Summary"]
     assert len(summary_artifacts) == 1
-    assert len(summary_artifacts[0][1]) == 1
+    assert len(summary_artifacts[0][1]) == 2
+    summary_data = [part.root.data for part in summary_artifacts[0][1] if isinstance(part.root, DataPart)][0]
+    assert summary_data["llm"]["solver"]["configured"]["model"] == "gpt-5"
 
     run_dirs = list((data_dir / "runs").iterdir())
     assert len(run_dirs) == 1

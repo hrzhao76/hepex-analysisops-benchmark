@@ -48,7 +48,7 @@ async def test_public_contract_e2e_mock_run(tmp_path):
     assert updater.completed is not None
     summary_artifacts = [artifact for artifact in updater.artifacts if artifact[0] == "Summary"]
     assert len(summary_artifacts) == 1
-    assert len(summary_artifacts[0][1]) == 1
+    assert len(summary_artifacts[0][1]) == 2
 
     data_payloads = [
         part.root.data
@@ -56,9 +56,10 @@ async def test_public_contract_e2e_mock_run(tmp_path):
         for part in parts
         if isinstance(part.root, DataPart)
     ]
-    assert len(data_payloads) == 1
-    assert data_payloads[0]["task_id"] == "t001_zpeak_fit"
-    assert "tasks" not in data_payloads[0]
+    task_payloads = [payload for payload in data_payloads if payload.get("task_id")]
+    assert len(task_payloads) == 1
+    assert task_payloads[0]["task_id"] == "t001_zpeak_fit"
+    assert "tasks" not in task_payloads[0]
 
     run_dirs = list((Path(req["config"]["data_dir"]) / "runs").iterdir())
     assert len(run_dirs) == 1
