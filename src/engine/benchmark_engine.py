@@ -29,6 +29,7 @@ CONTRACT_EVALUATION_MODES = {
     "directory_contract_and_private_l1",
     "directory_contract_and_private_rubric_v1",
 }
+DEFAULT_SOLVER_MODEL = "gpt-5"
 
 
 class SolverTransport(Protocol):
@@ -116,6 +117,32 @@ class BenchmarkEngine:
         report["solver_backend"] = solver_backend
         report["purple_agent_runtime_seconds"] = timing.get("purple_agent_runtime_seconds")
         report["timing"] = timing
+
+    @staticmethod
+    def _solver_llm_metadata(*, solver_backend: str, solver_model: str, source: str) -> dict[str, Any]:
+        return {
+            "configured": {
+                "backend": solver_backend,
+                "model": solver_model,
+                "source": source,
+            }
+        }
+
+    @staticmethod
+    def _merge_llm_metadata(report: dict[str, Any], *, fallback_llm: dict[str, Any], solver_llm: dict[str, Any]) -> None:
+        llm = dict(report.get("llm") or fallback_llm)
+        llm.setdefault("judge", fallback_llm.get("judge"))
+        llm["solver"] = solver_llm
+        report["llm"] = llm
+
+    @staticmethod
+    def _effective_solver_model(task: TaskSpec, cfg: GreenConfig) -> tuple[str, str]:
+        task_model = getattr(task, "solver_model", None)
+        if task_model:
+            return task_model, "task_or_override"
+        if cfg.solver_model:
+            return cfg.solver_model, "config"
+        return DEFAULT_SOLVER_MODEL, "default"
 
     @staticmethod
     def _has_runtime_shared_input(cfg: GreenConfig) -> bool:
@@ -459,6 +486,7 @@ class BenchmarkEngine:
         input_manifest: dict[str, Any],
         solver_work_dir: Path,
         solver_backend: str,
+        solver_model: str,
     ) -> dict[str, Any]:
         contract = load_submission_contract(task)
         prompt = load_solver_prompt(task) or _builtin_minimal_prompt(task.id, task.type)
@@ -481,6 +509,7 @@ class BenchmarkEngine:
             "mode": getattr(task, "mode", "mock"),
             "level": getattr(task, "level", None),
             "solver_backend": solver_backend,
+            "solver_model": solver_model,
             "prompt": prompt,
             "submission_contract": contract,
             "data": {
@@ -508,6 +537,7 @@ class BenchmarkEngine:
         persist_payloads: bool,
         solver_transport: SolverTransport,
         solver_backend: str,
+        solver_model: str,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         purple_agent_timing = self._no_purple_agent_timing()
         if getattr(task, "mode", "mock") == "mock":
@@ -520,7 +550,7 @@ class BenchmarkEngine:
 
         solver_work_dir = task_eval_dir / "solver_work"
         solver_work_dir.mkdir(parents=True, exist_ok=True)
-        payload = self._build_solver_payload(task, input_manifest, solver_work_dir, solver_backend)
+        payload = self._build_solver_payload(task, input_manifest, solver_work_dir, solver_backend, solver_model)
         if persist_payloads:
             _safe_write_json(task_eval_dir / "purple_request.json", payload)
 
@@ -570,6 +600,7 @@ class BenchmarkEngine:
         persist_payloads: bool,
         solver_transport: SolverTransport,
         solver_backend: str,
+        solver_model: str,
     ) -> dict[str, Any]:
         if task.solver_response_mode != "submission_bundle_v1":
             raise SubmissionBundleError(
@@ -586,6 +617,7 @@ class BenchmarkEngine:
                 persist_payloads,
                 solver_transport,
                 solver_backend,
+                solver_model,
             )
             if persist_payloads:
                 _safe_write_json(task_eval_dir / "submission_bundle_raw.json", raw_bundle)
@@ -599,6 +631,7 @@ class BenchmarkEngine:
                 "artifact_manifest": artifact_manifest,
                 "submission_bundle_raw": raw_bundle,
                 "solver_backend": solver_backend,
+                "solver_model": solver_model,
                 "purple_agent_timing": purple_agent_timing,
                 "purple_agent_runtime_seconds": purple_agent_timing.get("purple_agent_runtime_seconds"),
             }
@@ -622,6 +655,7 @@ class BenchmarkEngine:
             return {
                 "submission_trace": submission_trace,
                 "solver_backend": solver_backend,
+                "solver_model": solver_model,
                 "purple_agent_timing": purple_agent_timing,
                 "purple_agent_runtime_seconds": purple_agent_timing.get("purple_agent_runtime_seconds"),
             }
@@ -661,6 +695,14 @@ class BenchmarkEngine:
             "run_id": run_id,
             "run_dir": str(run_dir.resolve()),
             "data_dir": os.path.abspath(base_data_dir),
+            "llm": {
+                "judge": self.evaluation_engine.judge_metadata(),
+                "solver": self._solver_llm_metadata(
+                    solver_backend=cfg.solver_backend,
+                    solver_model=cfg.solver_model or DEFAULT_SOLVER_MODEL,
+                    source="config" if cfg.solver_model else "default",
+                ),
+            },
             "tasks": [],
             "score_total": 0.0,
             "score_max": float(len(task_runs)),
@@ -673,6 +715,13 @@ class BenchmarkEngine:
             task_eval_dir = self._task_eval_dir(runs_root, run_id, task.id)
             task_eval_dir.mkdir(parents=True, exist_ok=True)
             solver_backend = task.solver_backend or cfg.solver_backend
+            solver_model, solver_model_source = self._effective_solver_model(task, cfg)
+            solver_llm = self._solver_llm_metadata(
+                solver_backend=solver_backend,
+                solver_model=solver_model,
+                source=solver_model_source,
+            )
+            task_llm = {**overall["llm"], "solver": solver_llm}
             task_started_at = _utc_now_iso()
             task_start = time.perf_counter()
 
@@ -689,6 +738,7 @@ class BenchmarkEngine:
                 "max_files": getattr(task, "max_files", None),
                 "reuse_existing": getattr(task, "reuse_existing", None),
                 "solver_backend": solver_backend,
+                "solver_model": solver_model,
                 "solver_work_dir": str((task_eval_dir / "solver_work").resolve()),
                 "task_overrides_applied": applied_overrides,
             }
@@ -714,6 +764,7 @@ class BenchmarkEngine:
                     "type": task.type,
                     "status": "error",
                     "error": str(e),
+                    "llm": task_llm,
                     "task_overrides_applied": applied_overrides,
                     "final": {"total_score": 0.0, "max_score": 1.0, "normalized_score": 0.0},
                 }
@@ -744,6 +795,7 @@ class BenchmarkEngine:
                     "type": task.type,
                     "status": "error",
                     "error": f"Data preparation failed: {type(e).__name__}: {e}",
+                    "llm": task_llm,
                     "task_overrides_applied": applied_overrides,
                     "final": {"total_score": 0.0, "max_score": 1.0, "normalized_score": 0.0},
                 }
@@ -771,6 +823,7 @@ class BenchmarkEngine:
                 cfg.persist_payloads,
                 solver_transport,
                 solver_backend,
+                solver_model,
             )
 
             judge_input = {
@@ -790,6 +843,7 @@ class BenchmarkEngine:
                     "type": task.type,
                     "status": "error",
                     "error": f"Engine failed: {err_text}",
+                    "llm": task_llm,
                     "task_overrides_applied": applied_overrides,
                     "final": {"total_score": 0.0, "max_score": 1.0, "normalized_score": 0.0},
                 }
@@ -797,6 +851,7 @@ class BenchmarkEngine:
             report["task_id"] = task.id
             report["type"] = task.type
             report["task_overrides_applied"] = applied_overrides
+            self._merge_llm_metadata(report, fallback_llm=overall["llm"], solver_llm=solver_llm)
             timing = self._finish_task_timing(
                 task_started_at=task_started_at,
                 task_start=task_start,

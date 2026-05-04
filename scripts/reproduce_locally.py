@@ -209,13 +209,13 @@ def main():
     parser.add_argument(
         "--llm-provider",
         choices=["ollama", "openai"],
-        default="ollama",
-        help="LLM backend for local testing. Defaults to ollama.",
+        default="openai",
+        help="LLM backend for local testing. Defaults to openai.",
     )
     parser.add_argument(
         "--llm-model",
-        default="gpt-oss:20b",
-        help="Model name for the selected provider. Defaults to gpt-oss:20b.",
+        default="gpt-5",
+        help="Model name for the selected provider. Defaults to gpt-5.",
     )
     parser.add_argument(
         "--ollama-host",
@@ -255,7 +255,7 @@ def main():
     if args.llm_provider == "openai":
         judge_provider = "openai"
         judge_openai_model = _strip_provider_prefix(args.llm_model, "openai")
-        judge_ollama_model = "gpt-oss:20b"
+        judge_ollama_model = "gpt-5"
         agent_model = _agent_model_string("openai", args.llm_model)
     else:
         judge_provider = "ollama"

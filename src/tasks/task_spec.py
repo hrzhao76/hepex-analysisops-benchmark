@@ -60,6 +60,7 @@ class TaskSpec(BaseModel):
     input_strategy: Literal["download", "shared_manifest"] = "download"
     solver_response_mode: Literal["submission_bundle_v1"] = "submission_bundle_v1"
     solver_backend: Optional[str] = None
+    solver_model: Optional[str] = None
     evaluation_mode: EvaluationMode = "directory_contract_and_private_rubric_v1"
 
     # Task capabilities and defaults for large-input tasks.
@@ -87,12 +88,14 @@ class TaskRuntimeOverride(BaseModel):
     dataset: Optional[str] = None
     skim: Optional[str] = None
     solver_backend: Optional[str] = None
+    solver_model: Optional[str] = None
 
 
 class GreenConfig(BaseModel):
     data_dir: str = "/tmp/atlas_data_cache"
     task_dirs: list[str] = Field(default_factory=lambda: ["tasks_public/t001_zpeak_fit"])
     solver_backend: str = "agent_1_oh"
+    solver_model: Optional[str] = None
     input_access_mode: Optional[Literal["scenario_shared_mount", "local_shared_mount"]] = None
     shared_input_dir: Optional[str] = None
     input_manifest_path: Optional[str] = None

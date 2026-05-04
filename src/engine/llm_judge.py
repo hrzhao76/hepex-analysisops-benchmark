@@ -11,6 +11,12 @@ from typing import Any, Dict, Optional, Tuple
 
 from .prompt_render import render_judge_prompt
 
+DEFAULT_JUDGE_PROVIDER = "openai"
+DEFAULT_OPENAI_JUDGE_MODEL = "gpt-5"
+DEFAULT_GEMINI_JUDGE_MODEL = "gemini-2.5-flash"
+DEFAULT_OLLAMA_JUDGE_MODEL = "gpt-oss"
+DEFAULT_ANTHROPIC_JUDGE_MODEL = "claude-3-5-sonnet-20241022"
+
 @dataclass
 class LLMJudgeResult:
     ok: bool
@@ -32,7 +38,46 @@ class BaseJudge:
             return obj_match.group(1)
         return txt
 
+
+def configured_judge_metadata(env_overrides: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """Return configured judge provider/model without requiring API credentials."""
+    env = dict(os.environ)
+    if env_overrides:
+        env.update(env_overrides)
+    provider = env.get("HEPEX_JUDGE_PROVIDER", DEFAULT_JUDGE_PROVIDER).lower()
+    if provider == "gemini":
+        model = env.get("HEPEX_GEMINI_MODEL", DEFAULT_GEMINI_JUDGE_MODEL)
+    elif provider == "ollama":
+        model = env.get("HEPEX_OLLAMA_MODEL", DEFAULT_OLLAMA_JUDGE_MODEL)
+    elif provider == "anthropic":
+        model = env.get("HEPEX_ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_JUDGE_MODEL)
+    else:
+        model = env.get("HEPEX_OPENAI_MODEL", DEFAULT_OPENAI_JUDGE_MODEL)
+    return {"provider": provider, "model": model}
+
+
+def judge_runtime_metadata(
+    judge: Optional[BaseJudge],
+    *,
+    configured: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    metadata = {
+        "configured": configured or configured_judge_metadata(),
+        "runtime": {
+            "available": judge is not None,
+        },
+    }
+    if judge is not None:
+        metadata["runtime"].update(
+            {
+                "provider": getattr(judge, "provider", judge.__class__.__name__),
+                "model": getattr(judge, "model", None),
+            }
+        )
+    return metadata
+
 class GeminiJudge(BaseJudge):
+    provider = "gemini"
     """
     Minimal Gemini judge.
     Env:
@@ -52,7 +97,7 @@ class GeminiJudge(BaseJudge):
             
         self.client = genai.Client(api_key=api_key)
         self.genai_types = types
-        self.model = model or os.getenv("HEPEX_GEMINI_MODEL", "gemini-2.5-flash")
+        self.model = model or os.getenv("HEPEX_GEMINI_MODEL", DEFAULT_GEMINI_JUDGE_MODEL)
 
     def _generate_with_retry(self, prompt: str, config: Any, retries: int = 5) -> str:
         import time
@@ -122,9 +167,11 @@ class GeminiJudge(BaseJudge):
             return LLMJudgeResult(False, text, None, f"JSON parse failed: {type(e).__name__}: {e}")
 
 class OllamaJudge(BaseJudge):
+    provider = "ollama"
+
     def __init__(self, host: Optional[str] = None, model: Optional[str] = None):
         self.host = (host or os.getenv("OLLAMA_HOST", "http://localhost:11434")).rstrip("/")
-        self.model = model or os.getenv("HEPEX_OLLAMA_MODEL", "gpt-oss")
+        self.model = model or os.getenv("HEPEX_OLLAMA_MODEL", DEFAULT_OLLAMA_JUDGE_MODEL)
         self.endpoint = f"{self.host}/api/generate"
 
     def _generate(self, prompt: str) -> str:
@@ -180,6 +227,8 @@ class OllamaJudge(BaseJudge):
             return LLMJudgeResult(False, text, None, f"JSON parse failed: {type(e).__name__}: {e}")
 
 class OpenAIJudge(BaseJudge):
+    provider = "openai"
+
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
@@ -191,7 +240,7 @@ class OpenAIJudge(BaseJudge):
             raise RuntimeError("The 'openai' python package is required for OpenAIJudge")
             
         self.client = OpenAI(api_key=self.api_key)
-        self.model = model or os.getenv("HEPEX_OPENAI_MODEL", "gpt-5")
+        self.model = model or os.getenv("HEPEX_OPENAI_MODEL", DEFAULT_OPENAI_JUDGE_MODEL)
 
     def _generate(self, prompt: str) -> str:
         response = self.client.chat.completions.create(
@@ -230,6 +279,8 @@ class OpenAIJudge(BaseJudge):
             return LLMJudgeResult(False, text, None, f"JSON parse failed: {type(e).__name__}: {e}")
 
 class AnthropicJudge(BaseJudge):
+    provider = "anthropic"
+
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
@@ -241,7 +292,7 @@ class AnthropicJudge(BaseJudge):
             raise RuntimeError("The 'anthropic' python package is required for AnthropicJudge")
             
         self.client = Anthropic(api_key=self.api_key)
-        self.model = model or os.getenv("HEPEX_ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+        self.model = model or os.getenv("HEPEX_ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_JUDGE_MODEL)
 
     def _generate(self, prompt: str) -> str:
         system_prompt = "You are an automated grading judge. Please return only a valid JSON object."
@@ -285,7 +336,7 @@ class AnthropicJudge(BaseJudge):
 
 def get_judge() -> BaseJudge:
     """Factory to instantiate the correct judge based on HEPEX_JUDGE_PROVIDER."""
-    provider = os.getenv("HEPEX_JUDGE_PROVIDER", "openai").lower()
+    provider = os.getenv("HEPEX_JUDGE_PROVIDER", DEFAULT_JUDGE_PROVIDER).lower()
     
     if provider == "gemini":
         return GeminiJudge()

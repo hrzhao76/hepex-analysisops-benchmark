@@ -5,7 +5,7 @@ from typing import Any, Callable, Optional
 
 from .contract_validator import validate_submission_dir
 from .rubric_scorer import rubric_unavailable_report, score_submission
-from .llm_judge import BaseJudge, get_judge
+from .llm_judge import BaseJudge, configured_judge_metadata, get_judge, judge_runtime_metadata
 from .package_loader import load_private_rubric
 from .secret_store import SecretStore, patched_env
 
@@ -38,6 +38,11 @@ class EvaluationEngine:
             except RuntimeError:
                 return self.fallback_judge
 
+    def judge_metadata(self, secret_store: Optional[SecretStore] = None, judge: Optional[BaseJudge] = None) -> dict[str, Any]:
+        secret_store = secret_store or self.secret_store_factory()
+        configured = configured_judge_metadata(secret_store.get_judge_env())
+        return judge_runtime_metadata(judge if judge is not None else self.fallback_judge, configured=configured)
+
     def evaluate_submission(self, task: Any, submission_dir: Path) -> dict[str, Any]:
         if getattr(task, "evaluation_mode", None) not in SUPPORTED_EVALUATION_MODES:
             raise RuntimeError(
@@ -47,20 +52,24 @@ class EvaluationEngine:
 
         contract_report = validate_submission_dir(task, submission_dir)
         if contract_report.get("status") != "ok":
+            contract_report["llm"] = {"judge": self.judge_metadata()}
             return contract_report
 
         secret_store = self.secret_store_factory()
+        judge = self._build_secret_backed_judge(secret_store)
         private_rubric = load_private_rubric(task, secret_store)
         if private_rubric:
-            return score_submission(
+            report = score_submission(
                 task,
                 submission_dir,
                 private_rubric,
                 contract_report,
-                judge=self._build_secret_backed_judge(secret_store),
+                judge=judge,
             )
+            report["llm"] = {"judge": self.judge_metadata(secret_store, judge)}
+            return report
 
-        return rubric_unavailable_report(
+        report = rubric_unavailable_report(
             task,
             contract_report,
             reason=(
@@ -68,3 +77,5 @@ class EvaluationEngine:
                 "available from GREEN_SECRETS_JSON."
             ),
         )
+        report["llm"] = {"judge": self.judge_metadata(secret_store, judge)}
+        return report

@@ -66,7 +66,7 @@ class A2ARunObserver:
 
     async def summary(self, text: str, overall: dict[str, Any]) -> None:
         await self.updater.add_artifact(
-            parts=[Part(root=TextPart(text=text))],
+            parts=[Part(root=TextPart(text=text)), Part(root=DataPart(data=overall))],
             name="Summary",
         )
 
