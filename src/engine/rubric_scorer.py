@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -315,6 +316,51 @@ def _normalize_operator(value: Any) -> Any:
 
 def _compact_expr(value: str) -> str:
     return re.sub(r"[^a-z0-9_\[\]:+*/<>=!]+", "", value.lower())
+
+
+def _normalize_formula_key(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = value.strip().lower()
+    compact = _compact_expr(text)
+    alias = {
+        "data_minus_background_over_sqrt_background": "data_minus_background_over_sqrt_background",
+        "n_obsn_bkg/sqrtn_bkg": "data_minus_background_over_sqrt_background",
+        "nobsnbkg/sqrtnbkg": "data_minus_background_over_sqrt_background",
+        "obsbkg/sqrtbkg": "data_minus_background_over_sqrt_background",
+        "numerator_minus_background_over_sqrt_background": "numerator_minus_background_over_sqrt_background",
+        "signal_over_sqrt_background": "signal_over_sqrt_background",
+        "data_minus_background_over_sqrt_background_plus_variance": "data_minus_background_over_sqrt_background_plus_variance",
+        "numerator_over_sqrt_background_plus_fractional_systematic": "numerator_over_sqrt_background_plus_fractional_systematic",
+        "background_plus_signal_over_sqrt_background_plus_fractional_systematic": "background_plus_signal_over_sqrt_background_plus_fractional_systematic",
+        "bpluss_over_sqrt_b_plus_frac_b2": "background_plus_signal_over_sqrt_background_plus_fractional_systematic",
+    }
+    if compact in alias:
+        return alias[compact]
+    if "sqrt" in compact and (
+        "sum_iw_i2" in compact or "sum_iw_i^2" in compact or "sumw2" in compact or "sumw^2" in compact or "variance" in compact
+    ):
+        if (
+            ("data" in compact or "obs" in compact or "observed" in compact or "n_obs" in compact or "nobs" in compact)
+            and ("background" in compact or "bkg" in compact or "n_bkg" in compact or "nbkg" in compact)
+            and ("minus" in compact or "-" in text)
+        ):
+            return "data_minus_background_over_sqrt_background_plus_variance"
+    if "sqrt" in compact and ("0.3" in text or "fractional" in text or "systematic" in text):
+        if "backgroundplussignal" in compact or "b+s" in text or "numerator" in compact:
+            return "numerator_over_sqrt_background_plus_fractional_systematic"
+    if "sqrt" in compact and "signal" in compact and "background" in compact:
+        return "signal_over_sqrt_background"
+    if (
+        "sqrt" in compact
+        and ("data" in compact or "obs" in compact or "observed" in compact or "n_obs" in compact or "nobs" in compact)
+        and ("background" in compact or "bkg" in compact or "n_bkg" in compact or "nbkg" in compact)
+        and ("minus" in compact or "-" in text)
+    ):
+        return "data_minus_background_over_sqrt_background"
+    if "sqrt" in compact and "numerator" in compact and "background" in compact and ("minus" in compact or "-" in text):
+        return "numerator_minus_background_over_sqrt_background"
+    return compact
 
 
 def _selection_variable_aliases(value: Any) -> set[str]:
@@ -1003,9 +1049,30 @@ def _score_trace_data_assembly_semantics(
 
 
 def _score_mc_weighting_strategy(spec: dict[str, Any], trace: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
-    text = _coerce_text(trace).lower()
-    compact = _compact_expr(text)
+    evidence_field = spec.get("required_evidence_field") or spec.get("evidence_field")
+    structured_evidence: Any = None
     missing: list[str] = []
+    if isinstance(evidence_field, str) and evidence_field:
+        structured_evidence = trace.get(evidence_field)
+        if not isinstance(structured_evidence, dict):
+            reason = f"missing_structured_evidence:{evidence_field}"
+            if spec.get("require_structured_evidence", True):
+                missing.append(reason)
+            structured_evidence = {}
+    else:
+        structured_evidence = trace.get("mc_weighting_evidence") if isinstance(trace.get("mc_weighting_evidence"), dict) else {}
+
+    weighting_context = {
+        "mc_weighting_evidence": structured_evidence,
+        "scientific_decisions": trace.get("scientific_decisions"),
+        "inference_strategy": trace.get("inference_strategy"),
+        "validation_checks": trace.get("validation_checks"),
+        "validation_actions": trace.get("validation_actions"),
+        "result_summary": trace.get("result_summary"),
+        "workflow_stages": trace.get("workflow_stages"),
+    }
+    text = _coerce_text(weighting_context).lower()
+    compact = _compact_expr(text)
     if spec.get("data_policy") == "unweighted" and "unweighted" not in text:
         missing.append("data_policy:unweighted")
     if spec.get("mc_policy") and not any(token in text for token in ("weighted", "weighting", "normaliz", "normalis", "luminosity")):
@@ -1084,7 +1151,13 @@ def _score_mc_weighting_strategy(spec: dict[str, Any], trace: dict[str, Any]) ->
 
     return (
         1.0 if not missing else 0.0,
-        {"missing": missing, "present_factor_groups": present_groups, "missing_factor_groups": missing_groups},
+        {
+            "missing": missing,
+            "present_factor_groups": present_groups,
+            "missing_factor_groups": missing_groups,
+            "structured_evidence_field": evidence_field,
+            "structured_evidence_present": bool(structured_evidence),
+        },
     )
 
 
@@ -1184,7 +1257,241 @@ def _score_artifact_series_usable(spec: dict[str, Any], artifacts: dict[str, Any
         failures.append("nonempty")
     if "nonnegative_values" in requirements and any(value < 0 for value in series):
         failures.append("nonnegative_values")
-    return (1.0 if not failures else 0.0, {"failures": failures, "count": len(series)})
+    if "finite_values" in requirements and any(not math.isfinite(value) for value in series):
+        failures.append("finite_values")
+    if "positive_sum" in requirements and sum(series) <= 0:
+        failures.append("positive_sum")
+    if "any_positive" in requirements and not any(value > 0 for value in series):
+        failures.append("any_positive")
+    if "aligned_with_bin_edges" in requirements:
+        edges = _get_any_field(artifact, FIELD_ALIASES["bin_edges"], [])
+        if not isinstance(edges, list) or len(edges) != len(series) + 1:
+            failures.append("aligned_with_bin_edges")
+    min_sum = spec.get("min_sum")
+    if min_sum is not None and sum(series) < float(min_sum):
+        failures.append(f"min_sum:{min_sum}")
+    return (
+        1.0 if not failures else 0.0,
+        {
+            "failures": failures,
+            "count": len(series),
+            "sum": sum(series),
+            "max": max(series) if series else None,
+        },
+    )
+
+
+def _label_matches_text(label: str, text: str, compact_text: str) -> bool:
+    label_text = str(label).replace("_", " ").lower()
+    return label_text in text or str(label).lower() in text or _compact_expr(str(label)) in compact_text
+
+
+def _score_artifact_series_scale_plausibility(
+    spec: dict[str, Any],
+    artifacts: dict[str, Any],
+) -> Tuple[float, Dict[str, Any]]:
+    filename = spec.get("file")
+    artifact = artifacts.get(filename, {}) if isinstance(filename, str) else {}
+    if not isinstance(artifact, dict):
+        return (0.0, {"reason": "missing_artifact", "file": filename})
+
+    centers = _bin_centers_from_artifact(artifact)
+    observed = _series_for_artifact(artifact, str(spec.get("observed_field", "data_counts")))
+    expected = _series_for_artifact(artifact, str(spec.get("expected_field", "total_background_counts")))
+    if len(centers) != len(observed) or len(observed) != len(expected):
+        return (
+            0.0,
+            {
+                "reason": "missing_or_misaligned_histogram_data",
+                "centers": len(centers),
+                "observed": len(observed),
+                "expected": len(expected),
+            },
+        )
+
+    min_observed_sum = float(spec.get("min_observed_sum", 1.0))
+    min_expected_sum = float(spec.get("min_expected_sum", 0.0))
+    ratio_range = spec.get("expected_over_observed_sum_range", [0.0, float("inf")])
+    ratio_lo = float(ratio_range[0]) if isinstance(ratio_range, list) and ratio_range else 0.0
+    ratio_hi = float(ratio_range[1]) if isinstance(ratio_range, list) and len(ratio_range) > 1 else float("inf")
+    max_bin_ratio = float(spec.get("max_expected_over_observed_bin_ratio", float("inf")))
+    epsilon = float(spec.get("ratio_epsilon", 1e-9))
+
+    raw_regions = spec.get("regions") or [{"name": "full", "interval": None}]
+    regions: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_regions):
+        if isinstance(raw, dict):
+            regions.append(raw)
+        elif isinstance(raw, list) and len(raw) == 2:
+            regions.append({"name": f"region_{index}", "interval": raw})
+
+    failures: list[dict[str, Any]] = []
+    checks: list[dict[str, Any]] = []
+    for index, region in enumerate(regions):
+        interval = region.get("interval")
+        name = str(region.get("name", f"region_{index}"))
+        selected = list(range(len(centers)))
+        if isinstance(interval, list) and len(interval) == 2:
+            lo, hi = float(interval[0]), float(interval[1])
+            selected = [idx for idx, center in enumerate(centers) if lo <= center <= hi]
+        if not selected:
+            failures.append({"region": name, "reason": "no_bins_in_region", "interval": interval})
+            checks.append({"region": name, "interval": interval, "bin_count": 0})
+            continue
+
+        observed_sum = sum(observed[idx] for idx in selected)
+        expected_sum = sum(expected[idx] for idx in selected)
+        ratio = expected_sum / max(observed_sum, epsilon)
+        bin_ratios = [
+            expected[idx] / max(observed[idx], epsilon)
+            for idx in selected
+            if observed[idx] > 0 or expected[idx] > 0
+        ]
+        max_ratio = max(bin_ratios) if bin_ratios else 0.0
+        check = {
+            "region": name,
+            "interval": interval,
+            "bin_count": len(selected),
+            "observed_sum": observed_sum,
+            "expected_sum": expected_sum,
+            "expected_over_observed_sum_ratio": ratio,
+            "max_expected_over_observed_bin_ratio": max_ratio,
+        }
+        checks.append(check)
+
+        if observed_sum < min_observed_sum:
+            failures.append({"region": name, "reason": "observed_sum_too_small", **check})
+            continue
+        if expected_sum < min_expected_sum:
+            failures.append({"region": name, "reason": "expected_sum_too_small", **check})
+        if not (ratio_lo <= ratio <= ratio_hi):
+            failures.append({"region": name, "reason": "sum_ratio_out_of_range", "expected_range": [ratio_lo, ratio_hi], **check})
+        if max_ratio > max_bin_ratio:
+            failures.append({"region": name, "reason": "bin_ratio_too_large", "max_allowed": max_bin_ratio, **check})
+
+    return (1.0 if not failures else 0.0, {"failures": failures, "checks": checks})
+
+
+def _score_trace_execution_evidence_consistency(
+    spec: dict[str, Any],
+    submission_dir: Path,
+    trace: dict[str, Any],
+    artifacts: dict[str, Any],
+) -> Tuple[float, Dict[str, Any]]:
+    evidence_field = str(spec.get("evidence_field", "execution_evidence"))
+    evidence_obj = _get_path(trace, evidence_field, {})
+    if not isinstance(evidence_obj, dict):
+        return (0.0, {"reason": "missing_execution_evidence", "field": evidence_field})
+
+    required_fields = spec.get(
+        "required_fields",
+        [
+            "files_processed_count",
+            "events_processed_total",
+            "selected_events_total",
+            "candidates_built_total",
+            "histogram_filled_entries",
+        ],
+    )
+    required_fields = [str(field) for field in required_fields]
+    positive_fields = [str(field) for field in spec.get("required_positive_fields", required_fields)]
+    require_integer = bool(spec.get("require_integer_counters", True))
+
+    values: dict[str, float] = {}
+    failures: list[dict[str, Any]] = []
+    for field in required_fields:
+        value = _get_path(evidence_obj, field)
+        numeric = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+        integer_ok = not require_integer or (isinstance(value, int) and not isinstance(value, bool))
+        if not numeric or not integer_ok:
+            failures.append({"field": field, "reason": "missing_or_invalid_counter", "value": value})
+            continue
+        values[field] = float(value)
+
+    for field in positive_fields:
+        if field in values and values[field] <= 0:
+            failures.append({"field": field, "reason": "expected_positive", "value": values[field]})
+
+    events_total = values.get("events_processed_total")
+    selected_total = values.get("selected_events_total")
+    if events_total is not None and selected_total is not None and selected_total > events_total:
+        failures.append(
+            {
+                "field": "selected_events_total",
+                "reason": "selected_exceeds_processed",
+                "selected_events_total": selected_total,
+                "events_processed_total": events_total,
+            }
+        )
+
+    manifest_file = str(spec.get("input_manifest_file", "input_manifest.json"))
+    manifest = _load_json_if_exists(submission_dir / manifest_file)
+    manifest_file_count = None
+    if isinstance(manifest, dict) and isinstance(manifest.get("files"), list):
+        manifest_file_count = len(manifest.get("files") or [])
+        files_processed = values.get("files_processed_count")
+        if spec.get("require_files_processed_at_least_manifest_count") and files_processed is not None:
+            if files_processed < manifest_file_count:
+                failures.append(
+                    {
+                        "field": "files_processed_count",
+                        "reason": "less_than_manifest_file_count",
+                        "value": files_processed,
+                        "manifest_file_count": manifest_file_count,
+                    }
+                )
+        if spec.get("require_files_processed_equals_manifest_count") and files_processed is not None:
+            if files_processed != manifest_file_count:
+                failures.append(
+                    {
+                        "field": "files_processed_count",
+                        "reason": "differs_from_manifest_file_count",
+                        "value": files_processed,
+                        "manifest_file_count": manifest_file_count,
+                    }
+                )
+
+    spectrum_file = spec.get("spectrum_file")
+    spectrum = artifacts.get(spectrum_file, {}) if isinstance(spectrum_file, str) else {}
+    histogram_count_field = str(spec.get("histogram_count_field", "histogram_filled_entries"))
+    histogram_count = values.get(histogram_count_field)
+    series_evidence: dict[str, dict[str, Any]] = {}
+    if isinstance(spectrum, dict):
+        for field in spec.get("histogram_positive_series_fields", []) or []:
+            field = str(field)
+            series = _series_for_artifact(spectrum, field)
+            series_sum = sum(series)
+            series_evidence[field] = {"count": len(series), "sum": series_sum, "max": max(series) if series else None}
+            if not series or series_sum <= 0:
+                failures.append({"field": field, "reason": "spectrum_series_not_positive", "sum": series_sum})
+
+        cover_field = spec.get("histogram_count_must_cover_series_field")
+        if isinstance(cover_field, str) and histogram_count is not None:
+            series = _series_for_artifact(spectrum, cover_field)
+            series_sum = sum(series)
+            tolerance = float(spec.get("histogram_count_cover_absolute_tolerance", 1e-6))
+            if series and histogram_count + tolerance < series_sum:
+                failures.append(
+                    {
+                        "field": histogram_count_field,
+                        "reason": "histogram_count_below_series_sum",
+                        "histogram_count": histogram_count,
+                        "series_field": cover_field,
+                        "series_sum": series_sum,
+                    }
+                )
+    elif spectrum_file:
+        failures.append({"field": "spectrum_file", "reason": "missing_spectrum_artifact", "file": spectrum_file})
+
+    return (
+        1.0 if not failures else 0.0,
+        {
+            "failures": failures,
+            "counters": values,
+            "manifest_file_count": manifest_file_count,
+            "series": series_evidence,
+        },
+    )
 
 
 def _score_histogram_excess_in_region(spec: dict[str, Any], artifacts: dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
@@ -1236,14 +1543,23 @@ def _score_validation_evidence(spec: dict[str, Any], submission_dir: Path, trace
     trace_text = _coerce_text(trace).lower()
     labels = spec.get("trace_stage_families_any_labels", spec.get("allowed_validation_types", []))
     compact = _compact_expr(trace_text)
-    matching_labels = [
-        label
-        for label in labels
-        if str(label).replace("_", " ").lower() in trace_text
-        or str(label).lower() in trace_text
-        or _compact_expr(str(label)) in compact
-    ]
+    matching_labels = [label for label in labels if _label_matches_text(str(label), trace_text, compact)]
+
+    alias_groups = spec.get("validation_type_aliases", {})
+    matched_groups: dict[str, list[str]] = {}
+    if isinstance(alias_groups, dict):
+        for group, aliases in alias_groups.items():
+            group_labels = [str(group)]
+            if isinstance(aliases, list):
+                group_labels.extend(str(alias) for alias in aliases)
+            elif isinstance(aliases, str):
+                group_labels.append(aliases)
+            matched = [label for label in group_labels if _label_matches_text(label, trace_text, compact)]
+            if matched:
+                matched_groups[str(group)] = matched
+
     min_count = int(spec.get("minimum_count", 1))
+    min_group_count = int(spec.get("minimum_group_count", 0))
     count = len(existing) + len(matching_labels)
     validation_fields = [
         field
@@ -1266,13 +1582,19 @@ def _score_validation_evidence(spec: dict[str, Any], submission_dir: Path, trace
     )
     generic_evidence = any(token in trace_text for token in generic_tokens)
     count += len(validation_fields)
+    count += len(matched_groups)
     if spec.get("requires_result_record") and (generic_evidence or validation_fields):
         count += 1
+    passed = count >= min_count
+    if min_group_count:
+        passed = passed and len(matched_groups) >= min_group_count
     return (
-        1.0 if count >= min_count else 0.0,
+        1.0 if passed else 0.0,
         {
             "existing_files": existing,
             "matching_labels": matching_labels,
+            "matched_groups": matched_groups,
+            "minimum_group_count": min_group_count,
             "validation_fields": validation_fields,
             "generic_evidence": generic_evidence,
             "count": count,
@@ -1381,6 +1703,30 @@ def _integrate_series_in_window(artifact: dict[str, Any], field: str, window: li
     return None
 
 
+def _integrate_squared_series_in_window(artifact: dict[str, Any], field: str, window: list[float]) -> float | None:
+    series = _series_for_artifact(artifact, field)
+    if not series or len(window) != 2:
+        return None
+    edges = _get_any_field(artifact, FIELD_ALIASES["bin_edges"], [])
+    if isinstance(edges, list) and len(edges) == len(series) + 1:
+        total = 0.0
+        for lo, hi, value in zip(edges[:-1], edges[1:], series):
+            if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+                return None
+            width = float(hi) - float(lo)
+            if width <= 0:
+                return None
+            overlap = _interval_overlap_width([lo, hi], window)
+            if overlap > 0:
+                scaled = float(value) * overlap / width
+                total += scaled * scaled
+        return total
+    centers = _bin_centers_from_artifact(artifact)
+    if len(centers) == len(series):
+        return sum(float(value) * float(value) for center, value in zip(centers, series) if window[0] <= center <= window[1])
+    return None
+
+
 def _score_artifact_window_consistency(
     spec: dict[str, Any],
     artifacts: dict[str, Any],
@@ -1399,9 +1745,11 @@ def _score_artifact_window_consistency(
 
     data_field = str(spec.get("data_field", "data_counts"))
     background_field = str(spec.get("background_field", "total_background_counts"))
+    background_uncertainty_field = str(spec.get("background_uncertainty_field", "total_background_uncertainty"))
     signal_field = spec.get("signal_field")
     data_yield = _integrate_series_in_window(spectrum, data_field, window)
     background_yield = _integrate_series_in_window(spectrum, background_field, window)
+    background_variance = _integrate_squared_series_in_window(spectrum, background_uncertainty_field, window)
     signal_yield = _integrate_series_in_window(spectrum, str(signal_field), window) if isinstance(signal_field, str) else None
     if data_yield is None or background_yield is None:
         return (0.0, {"reason": "missing_window_series", "window": window})
@@ -1413,6 +1761,7 @@ def _score_artifact_window_consistency(
         "window": window,
         "derived_data_yield": data_yield,
         "derived_background_yield": background_yield,
+        "derived_background_variance": background_variance,
         "derived_signal_yield": signal_yield,
     }
 
@@ -1430,6 +1779,27 @@ def _score_artifact_window_consistency(
         if summary_data is None or not _relative_close(summary_data, data_yield, rel_tol=rel_tol, abs_tol=abs_tol):
             failures.append({"field": summary_data_field, "summary": summary_data, "derived": data_yield})
 
+    summary_signal_field = spec.get("summary_signal_field")
+    if isinstance(summary_signal_field, str):
+        summary_signal = _numeric_value(summary.get(summary_signal_field))
+        checks["summary_signal_yield"] = summary_signal
+        if (
+            summary_signal is None
+            or signal_yield is None
+            or not _relative_close(summary_signal, signal_yield, rel_tol=rel_tol, abs_tol=abs_tol)
+        ):
+            failures.append({"field": summary_signal_field, "summary": summary_signal, "derived": signal_yield})
+
+    configured_formula = str(spec.get("significance_formula", "data_minus_background_over_sqrt_background"))
+    summary_formula_field = str(spec.get("summary_significance_formula_field", "significance_formula"))
+    declared_formula = _normalize_formula_key(summary.get(summary_formula_field))
+    significance_formula = (
+        declared_formula
+        if configured_formula in {"declared_supported_formula", "declared_or_supported_formula"}
+        else _normalize_formula_key(configured_formula)
+    )
+    allowed_formulas = [_normalize_formula_key(value) for value in spec.get("allowed_significance_formulas", []) or []]
+
     numerator_field = spec.get("summary_numerator_field")
     numerator_policy = str(spec.get("summary_numerator_policy", "data"))
     summary_numerator: float | None = None
@@ -1440,6 +1810,20 @@ def _score_artifact_window_consistency(
             expected_numerator = None if signal_yield is None else background_yield + signal_yield
         elif numerator_policy == "data_minus_background":
             expected_numerator = data_yield - background_yield
+        elif numerator_policy in {"declared_formula_numerator", "formula_numerator"}:
+            if significance_formula in {
+                "data_minus_background_over_sqrt_background",
+                "data_minus_background_over_sqrt_background_plus_variance",
+            }:
+                expected_numerator = data_yield - background_yield
+            elif significance_formula == "signal_over_sqrt_background":
+                expected_numerator = signal_yield
+            elif significance_formula == "background_plus_signal_over_sqrt_background_plus_fractional_systematic":
+                expected_numerator = None if signal_yield is None else background_yield + signal_yield
+            elif significance_formula == "numerator_minus_background_over_sqrt_background":
+                expected_numerator = data_yield
+            else:
+                expected_numerator = data_yield
         else:
             expected_numerator = data_yield
         checks["summary_numerator_yield"] = summary_numerator
@@ -1453,16 +1837,44 @@ def _score_artifact_window_consistency(
 
     significance_field = spec.get("significance_field", "significance_proxy")
     significance = _numeric_value(summary.get(str(significance_field)))
-    significance_formula = str(spec.get("significance_formula", "data_minus_background_over_sqrt_background"))
     expected_significance: float | None = None
+    if allowed_formulas and significance_formula not in allowed_formulas:
+        failures.append(
+            {
+                "field": summary_formula_field,
+                "summary": summary.get(summary_formula_field),
+                "reason": "unsupported_significance_formula",
+                "allowed": allowed_formulas,
+            }
+        )
     if significance_formula == "data_minus_background_over_sqrt_background" and background_yield > 0:
         expected_significance = (data_yield - background_yield) / (background_yield ** 0.5)
+    elif (
+        significance_formula == "data_minus_background_over_sqrt_background_plus_variance"
+        and background_yield > 0
+        and background_variance is not None
+    ):
+        variance = background_yield + background_variance
+        if variance > 0:
+            expected_significance = (data_yield - background_yield) / (variance ** 0.5)
     elif significance_formula == "numerator_minus_background_over_sqrt_background" and background_yield > 0:
         numerator_for_significance = summary_numerator if summary_numerator is not None else expected_numerator
         if numerator_for_significance is not None:
             expected_significance = (numerator_for_significance - background_yield) / (background_yield ** 0.5)
     elif significance_formula == "signal_over_sqrt_background" and signal_yield is not None and background_yield > 0:
         expected_significance = signal_yield / (background_yield ** 0.5)
+    elif significance_formula in {
+        "numerator_over_sqrt_background_plus_fractional_systematic",
+        "background_plus_signal_over_sqrt_background_plus_fractional_systematic",
+    } and background_yield > 0:
+        numerator_for_significance = summary_numerator if summary_numerator is not None else expected_numerator
+        background_systematic_fraction = summary.get("background_systematic_fraction", spec.get("background_systematic_fraction", 0.0))
+        background_systematic_fraction = float(background_systematic_fraction)
+        variance = background_yield + background_systematic_fraction * background_yield * background_yield
+        if numerator_for_significance is not None and variance > 0:
+            expected_significance = numerator_for_significance / (variance ** 0.5)
+    checks["summary_significance_formula"] = summary.get(summary_formula_field)
+    checks["normalized_significance_formula"] = significance_formula
     checks["summary_significance"] = significance
     checks["expected_significance"] = expected_significance
     if significance is not None and expected_significance is not None:
@@ -1470,6 +1882,30 @@ def _score_artifact_window_consistency(
         sig_rel_tol = float(spec.get("significance_relative_tolerance", 0.05))
         if not _relative_close(significance, expected_significance, rel_tol=sig_rel_tol, abs_tol=sig_abs_tol):
             failures.append({"field": significance_field, "summary": significance, "derived": expected_significance})
+    expected_significance_range = spec.get("expected_significance_range")
+    if isinstance(expected_significance_range, list) and len(expected_significance_range) == 2:
+        lo, hi = float(expected_significance_range[0]), float(expected_significance_range[1])
+        if significance is None or not (lo <= significance <= hi):
+            failures.append(
+                {
+                    "field": significance_field,
+                    "summary": significance,
+                    "reason": "outside_expected_significance_range",
+                    "expected_range": [lo, hi],
+                }
+            )
+
+    positive_yields = {
+        "data": data_yield,
+        "background": background_yield,
+        "signal": signal_yield,
+        "numerator": summary_numerator if summary_numerator is not None else expected_numerator,
+        "significance": significance,
+    }
+    for label in spec.get("required_positive_window_yields", []) or []:
+        value = positive_yields.get(str(label))
+        if value is None or value <= 0:
+            failures.append({"field": str(label), "reason": "expected_positive_window_value", "value": value})
 
     threshold = spec.get("validation_required_above_significance")
     validation_present = _has_validation_evidence(trace)
@@ -1575,6 +2011,15 @@ def _score_deterministic(
         return _score_artifact_window_consistency(condition["artifact_window_consistency"], artifacts, trace)
     if "artifact_series_usable" in condition:
         return _score_artifact_series_usable(condition["artifact_series_usable"], artifacts)
+    if "artifact_series_scale_plausibility" in condition:
+        return _score_artifact_series_scale_plausibility(condition["artifact_series_scale_plausibility"], artifacts)
+    if "trace_execution_evidence_consistency" in condition:
+        return _score_trace_execution_evidence_consistency(
+            condition["trace_execution_evidence_consistency"],
+            submission_dir,
+            trace,
+            artifacts,
+        )
     if "artifact_field_constraints" in condition:
         spec = condition["artifact_field_constraints"]
         return (1.0 if artifacts.get(spec.get("file")) else 0.0, {"checked": "artifact_field_constraints"})
@@ -1622,6 +2067,13 @@ def _score_structural(
         return _score_files_nonempty([str(name) for name in files], submission_dir)
     if "trace_required_fields" in condition:
         return _score_required_trace_fields(condition["trace_required_fields"], trace)
+    if "trace_execution_evidence_consistency" in condition:
+        return _score_trace_execution_evidence_consistency(
+            condition["trace_execution_evidence_consistency"],
+            submission_dir,
+            trace,
+            artifacts,
+        )
     if "trace_stage_families_present" in condition:
         return _score_stage_families_present(condition["trace_stage_families_present"], trace)
     if "trace_stage_family_order" in condition:

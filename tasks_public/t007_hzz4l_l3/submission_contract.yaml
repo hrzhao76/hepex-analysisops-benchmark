@@ -1,5 +1,5 @@
 version: 1
-level: l2
+level: l3
 required_outputs:
 - name: four_lepton_mass_spectrum
   canonical_filename: four_lepton_mass_spectrum.json
@@ -79,7 +79,7 @@ schemas:
     required_sections: []
     constraints:
       non_empty: true
-      min_characters: 20
+      min_characters: 80
   four_lepton_mass_spectrum_plot.image_ref:
     required_fields: []
     field_types: {}
@@ -89,9 +89,11 @@ schemas:
     - execution_evidence
     - scientific_decisions
     - input_samples_used
+    - mc_weighting_evidence
     - validation_checks
     - observable_constructed
     - inference_strategy
+    - result_summary
     - output_files_generated
     field_types:
       workflow_stages: array_object
@@ -99,8 +101,10 @@ schemas:
       scientific_decisions: array_object
       observable_constructed: object
       inference_strategy: object
+      result_summary: object
       output_files_generated: array_string
       input_samples_used: array_object
+      mc_weighting_evidence: object
       validation_checks: array_object
     nested_required_fields:
       workflow_stages:
@@ -131,11 +135,37 @@ schemas:
       inference_strategy:
         required_fields:
         - method_family
+      result_summary:
+        required_fields:
+        - conclusion
       input_samples_used:
         required_fields:
         - sample_name
         - sample_role
         - files_used
+      mc_weighting_evidence:
+        required_fields:
+        - data_policy
+        - mc_policy
+        - luminosity_fb_inv
+        - weight_formula
+        - event_weight_factors_used
+        - sample_normalization_fields
+        - scale_factors_used
+        - missing_fields
+        - fallback_strategy
+        - uncertainty_policy
+        field_types:
+          data_policy: string
+          mc_policy: string
+          luminosity_fb_inv: float
+          weight_formula: string
+          event_weight_factors_used: array_string
+          sample_normalization_fields: array_string
+          scale_factors_used: array_string
+          missing_fields: array_string
+          fallback_strategy: string
+          uncertainty_policy: string
       validation_checks:
         required_fields:
         - validation_type
@@ -152,4 +182,6 @@ schemas:
       workflow_stages:
         min_length: 1
       scientific_decisions:
+        min_length: 1
+      validation_checks:
         min_length: 1

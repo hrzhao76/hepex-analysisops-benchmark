@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Protocol
@@ -78,6 +79,43 @@ class BenchmarkEngine:
     @staticmethod
     def _task_eval_dir(runs_root: Path, run_id: str, task_id: str) -> Path:
         return runs_root / run_id / task_id
+
+    @staticmethod
+    def _elapsed_seconds(start: float) -> float:
+        return round(max(0.0, time.perf_counter() - start), 6)
+
+    @staticmethod
+    def _no_purple_agent_timing() -> dict[str, Any]:
+        return {
+            "purple_agent_used": False,
+            "purple_agent_started_at": None,
+            "purple_agent_finished_at": None,
+            "purple_agent_runtime_seconds": None,
+        }
+
+    @classmethod
+    def _finish_task_timing(
+        cls,
+        *,
+        task_started_at: str,
+        task_start: float,
+        purple_agent_timing: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        timing = {
+            "task_started_at": task_started_at,
+            "task_finished_at": _utc_now_iso(),
+            "task_runtime_seconds": cls._elapsed_seconds(task_start),
+        }
+        normalized_purple_timing = cls._no_purple_agent_timing()
+        normalized_purple_timing.update(purple_agent_timing or {})
+        timing.update(normalized_purple_timing)
+        return timing
+
+    @staticmethod
+    def _attach_runtime_fields(report: dict[str, Any], *, solver_backend: str, timing: dict[str, Any]) -> None:
+        report["solver_backend"] = solver_backend
+        report["purple_agent_runtime_seconds"] = timing.get("purple_agent_runtime_seconds")
+        report["timing"] = timing
 
     @staticmethod
     def _has_runtime_shared_input(cfg: GreenConfig) -> bool:
@@ -470,12 +508,15 @@ class BenchmarkEngine:
         persist_payloads: bool,
         solver_transport: SolverTransport,
         solver_backend: str,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        purple_agent_timing = self._no_purple_agent_timing()
         if getattr(task, "mode", "mock") == "mock":
             bundle = get_mock_bundle(task.type, task.id)
             if bundle.get("status") == "error":
-                raise SubmissionBundleError(bundle.get("error", f"Unknown mock bundle error for task {task.id}"))
-            return bundle
+                error = SubmissionBundleError(bundle.get("error", f"Unknown mock bundle error for task {task.id}"))
+                error.purple_agent_timing = purple_agent_timing
+                raise error
+            return bundle, purple_agent_timing
 
         solver_work_dir = task_eval_dir / "solver_work"
         solver_work_dir.mkdir(parents=True, exist_ok=True)
@@ -483,15 +524,42 @@ class BenchmarkEngine:
         if persist_payloads:
             _safe_write_json(task_eval_dir / "purple_request.json", payload)
 
-        response_str = await solver_transport.request_submission_bundle(payload)
+        purple_agent_timing = {
+            "purple_agent_used": True,
+            "purple_agent_started_at": _utc_now_iso(),
+            "purple_agent_finished_at": None,
+            "purple_agent_runtime_seconds": None,
+        }
+        purple_agent_start = time.perf_counter()
+        try:
+            response_str = await solver_transport.request_submission_bundle(payload)
+        except Exception as e:
+            purple_agent_timing.update(
+                {
+                    "purple_agent_finished_at": _utc_now_iso(),
+                    "purple_agent_runtime_seconds": self._elapsed_seconds(purple_agent_start),
+                }
+            )
+            e.purple_agent_timing = purple_agent_timing
+            raise
+        purple_agent_timing.update(
+            {
+                "purple_agent_finished_at": _utc_now_iso(),
+                "purple_agent_runtime_seconds": self._elapsed_seconds(purple_agent_start),
+            }
+        )
+        if persist_payloads:
+            _safe_write_json(task_eval_dir / "purple_agent_timing.json", purple_agent_timing)
+
         if persist_payloads:
             _safe_write_text(task_eval_dir / "purple_response_raw.txt", response_str)
 
         try:
-            return json.loads(self._extract_json_from_response(response_str))
+            return json.loads(self._extract_json_from_response(response_str)), purple_agent_timing
         except json.JSONDecodeError as e:
             error = SubmissionBundleError(f"Purple agent returned non-JSON response: {e}")
             error.raw_response = response_str
+            error.purple_agent_timing = purple_agent_timing
             raise error from e
 
     async def _collect_solver_output(
@@ -509,8 +577,9 @@ class BenchmarkEngine:
             )
 
         contract = load_submission_contract(task)
+        purple_agent_timing = self._no_purple_agent_timing()
         try:
-            raw_bundle = await self._get_submission_bundle(
+            raw_bundle, purple_agent_timing = await self._get_submission_bundle(
                 task,
                 input_manifest or {},
                 task_eval_dir,
@@ -529,8 +598,14 @@ class BenchmarkEngine:
                 "submission_trace": submission_trace,
                 "artifact_manifest": artifact_manifest,
                 "submission_bundle_raw": raw_bundle,
+                "solver_backend": solver_backend,
+                "purple_agent_timing": purple_agent_timing,
+                "purple_agent_runtime_seconds": purple_agent_timing.get("purple_agent_runtime_seconds"),
             }
         except Exception as e:
+            purple_agent_timing = getattr(e, "purple_agent_timing", purple_agent_timing)
+            if persist_payloads:
+                _safe_write_json(task_eval_dir / "purple_agent_timing.json", purple_agent_timing)
             submission_trace = {
                 "task_id": task.id,
                 "status": "error",
@@ -544,7 +619,12 @@ class BenchmarkEngine:
                     )
                 )
             _safe_write_json(task_eval_dir / "submission_trace.json", submission_trace)
-            return {"submission_trace": submission_trace}
+            return {
+                "submission_trace": submission_trace,
+                "solver_backend": solver_backend,
+                "purple_agent_timing": purple_agent_timing,
+                "purple_agent_runtime_seconds": purple_agent_timing.get("purple_agent_runtime_seconds"),
+            }
 
     async def run(
         self,
@@ -593,9 +673,12 @@ class BenchmarkEngine:
             task_eval_dir = self._task_eval_dir(runs_root, run_id, task.id)
             task_eval_dir.mkdir(parents=True, exist_ok=True)
             solver_backend = task.solver_backend or cfg.solver_backend
+            task_started_at = _utc_now_iso()
+            task_start = time.perf_counter()
 
             meta = {
-                "timestamp": _utc_now_iso(),
+                "timestamp": task_started_at,
+                "started_at": task_started_at,
                 "task_id": task.id,
                 "task_type": task.type,
                 "mode": getattr(task, "mode", "mock"),
@@ -621,6 +704,11 @@ class BenchmarkEngine:
                     observer,
                 )
             except (InputAccessError, SubmissionBundleError) as e:
+                timing = self._finish_task_timing(
+                    task_started_at=task_started_at,
+                    task_start=task_start,
+                    purple_agent_timing=self._no_purple_agent_timing(),
+                )
                 task_report = {
                     "task_id": task.id,
                     "type": task.type,
@@ -629,10 +717,28 @@ class BenchmarkEngine:
                     "task_overrides_applied": applied_overrides,
                     "final": {"total_score": 0.0, "max_score": 1.0, "normalized_score": 0.0},
                 }
+                self._attach_runtime_fields(task_report, solver_backend=solver_backend, timing=timing)
                 overall["tasks"].append(task_report)
+                meta.update(
+                    {
+                        "score_total": 0.0,
+                        "score_max": 1.0,
+                        "normalized_score": 0.0,
+                        "finished_at": timing["task_finished_at"],
+                        "status": "error",
+                        "task_runtime_seconds": timing["task_runtime_seconds"],
+                        "purple_agent_runtime_seconds": timing["purple_agent_runtime_seconds"],
+                    }
+                )
+                _safe_write_json(task_eval_dir / "meta.json", meta)
                 await observer.task_result(f"Result-{task.id}", f"[{task.id}] ERROR: {e}", task_report)
                 continue
             except Exception as e:
+                timing = self._finish_task_timing(
+                    task_started_at=task_started_at,
+                    task_start=task_start,
+                    purple_agent_timing=self._no_purple_agent_timing(),
+                )
                 task_report = {
                     "task_id": task.id,
                     "type": task.type,
@@ -641,7 +747,20 @@ class BenchmarkEngine:
                     "task_overrides_applied": applied_overrides,
                     "final": {"total_score": 0.0, "max_score": 1.0, "normalized_score": 0.0},
                 }
+                self._attach_runtime_fields(task_report, solver_backend=solver_backend, timing=timing)
                 overall["tasks"].append(task_report)
+                meta.update(
+                    {
+                        "score_total": 0.0,
+                        "score_max": 1.0,
+                        "normalized_score": 0.0,
+                        "finished_at": timing["task_finished_at"],
+                        "status": "error",
+                        "task_runtime_seconds": timing["task_runtime_seconds"],
+                        "purple_agent_runtime_seconds": timing["purple_agent_runtime_seconds"],
+                    }
+                )
+                _safe_write_json(task_eval_dir / "meta.json", meta)
                 await observer.task_result(f"Result-{task.id}", f"[{task.id}] ERROR: data preparation failed.", task_report)
                 continue
 
@@ -678,6 +797,12 @@ class BenchmarkEngine:
             report["task_id"] = task.id
             report["type"] = task.type
             report["task_overrides_applied"] = applied_overrides
+            timing = self._finish_task_timing(
+                task_started_at=task_started_at,
+                task_start=task_start,
+                purple_agent_timing=collected.get("purple_agent_timing"),
+            )
+            self._attach_runtime_fields(report, solver_backend=solver_backend, timing=timing)
 
             final = report.setdefault("final", {})
             total_score = float(final.get("total_score", 0.0))
@@ -698,8 +823,10 @@ class BenchmarkEngine:
                     "score_total": total_score,
                     "score_max": max_score,
                     "normalized_score": normalized,
-                    "finished_at": _utc_now_iso(),
+                    "finished_at": timing["task_finished_at"],
                     "status": report.get("status", "ok"),
+                    "task_runtime_seconds": timing["task_runtime_seconds"],
+                    "purple_agent_runtime_seconds": timing["purple_agent_runtime_seconds"],
                 }
             )
             _safe_write_json(task_eval_dir / "meta.json", meta)

@@ -71,6 +71,11 @@ async def test_benchmark_engine_mock_run_materializes_public_bundle(tmp_path):
     assert run_summary == result.overall
     assert result.overall["score_total"] == 1.0
     assert observer.task_results[0][0] == "Result-t001_zpeak_fit"
+    task_report = observer.task_results[0][2]
+    assert task_report["solver_backend"] == "agent_1_oh"
+    assert task_report["purple_agent_runtime_seconds"] is None
+    assert task_report["timing"]["purple_agent_used"] is False
+    assert task_report["timing"]["task_runtime_seconds"] >= 0.0
 
 
 @pytest.mark.asyncio
@@ -88,6 +93,7 @@ async def test_benchmark_engine_real_mode_calls_solver_transport_with_contract(t
     await engine.run(request, transport, observer)
 
     assert len(transport.payloads) == 1
+    report = observer.task_results[0][2]
     payload = transport.payloads[0]
     assert payload["task_id"] == "t001_zpeak_fit"
     assert payload["solver_backend"] == "agent_1_oh"
@@ -97,6 +103,33 @@ async def test_benchmark_engine_real_mode_calls_solver_transport_with_contract(t
     assert payload["data"]["work_dir"].endswith("/t001_zpeak_fit/solver_work")
     assert payload["data"]["output_dir"] == payload["data"]["work_dir"]
     assert Path(payload["data"]["work_dir"]).is_dir()
+    assert report["solver_backend"] == "agent_1_oh"
+    assert report["purple_agent_runtime_seconds"] >= 0.0
+    assert report["timing"]["purple_agent_used"] is True
+    assert report["timing"]["purple_agent_runtime_seconds"] == report["purple_agent_runtime_seconds"]
+
+
+@pytest.mark.asyncio
+async def test_benchmark_engine_keeps_purple_runtime_when_bundle_is_invalid(tmp_path):
+    engine = BenchmarkEngine()
+    observer = FakeObserver()
+    transport = FakeTransport(response_bundle={"status": "ok", "artifacts": {}})
+    request = eval_request(
+        {
+            "data_dir": str(tmp_path / "data"),
+            "task_dirs": [str(ZPEAK_TASK_DIR)],
+        }
+    )
+
+    result = await engine.run(request, transport, observer)
+
+    task_dir = Path(result.overall["run_dir"]) / "t001_zpeak_fit"
+    report = observer.task_results[0][2]
+    timing = json.loads((task_dir / "purple_agent_timing.json").read_text(encoding="utf-8"))
+    assert report["solver_backend"] == "agent_1_oh"
+    assert report["purple_agent_runtime_seconds"] >= 0.0
+    assert report["timing"]["purple_agent_used"] is True
+    assert timing["purple_agent_runtime_seconds"] == report["purple_agent_runtime_seconds"]
 
 
 @pytest.mark.asyncio

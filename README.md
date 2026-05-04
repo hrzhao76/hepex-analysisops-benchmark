@@ -199,10 +199,40 @@ testing, generate `GREEN_SECRETS_JSON` from the private rubric source:
 uv run python scripts/export_green_secrets.py
 ```
 
+The exporter defaults to the full task suite and writes compressed private
+rubrics using `private_rubric_yaml_gz_b64`. This keeps the all-task secret small
+enough for GitHub Secrets while preserving the same hidden-scoring behavior.
+The Green Agent also still accepts the legacy uncompressed
+`private_rubric_yaml_b64` format.
+
 By default this updates:
 
 - `hepex-analysisops-benchmark/.env`
 - `hepex-analysisops-leaderboard/.env`
+
+Task-family subsets are useful when testing a general agent against only one
+analysis family:
+
+```bash
+# Export all currently registered hidden rubrics
+uv run python scripts/export_green_secrets.py --suite all
+
+# Export only Hyy L1/L2/L3
+uv run python scripts/export_green_secrets.py --suite hyy
+
+# Export only HZZ4l L1/L2
+uv run python scripts/export_green_secrets.py --suite hzz
+```
+
+For GitHub Secrets, print just the secret value without updating local `.env`
+files:
+
+```bash
+uv run python scripts/export_green_secrets.py --suite all --dry-run --stdout | tail -n 1
+```
+
+Use `--encoding plain` only when debugging an older Green image that has not yet
+been updated to read `private_rubric_yaml_gz_b64`.
 
 Run this whenever `submission_contract.yaml` or the private rubric changes,
 because the private rubric lookup is keyed by public contract hash.
@@ -275,8 +305,14 @@ uv run pytest tests/test_hyy_v5_l1_flow.py -q
 # Build local Green image
 docker build -t hepex-green-agent:local .
 
-# Regenerate GREEN_SECRETS_JSON after rubric or contract changes
+# Regenerate compressed GREEN_SECRETS_JSON after rubric or contract changes
 uv run python scripts/export_green_secrets.py
+
+# Generate a GitHub Secret value for all tasks
+uv run python scripts/export_green_secrets.py --suite all --dry-run --stdout | tail -n 1
+
+# Limit secrets to one task family while testing
+uv run python scripts/export_green_secrets.py --suite hyy
 ```
 
 ## Attribution

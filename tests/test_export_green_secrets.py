@@ -1,4 +1,5 @@
 import base64
+import gzip
 import importlib.util
 import json
 import sys
@@ -110,14 +111,32 @@ def test_build_green_secrets_json_includes_multiple_tasks(tmp_path):
     assert payload["judge_env"] == {"HEPEX_OPENAI_MODEL": "unit-test-model"}
     assert [task_id for task_id, _hash in summaries] == ["task_a", "task_b"]
 
-    decoded = base64.b64decode(payload["tasks"]["task_a"]["private_rubric_yaml_b64"]).decode("utf-8")
+    decoded = gzip.decompress(
+        base64.b64decode(payload["tasks"]["task_a"]["private_rubric_yaml_gz_b64"])
+    ).decode("utf-8")
     assert yaml.safe_load(decoded)["checks"]["execution"][0]["id"] == "required_trace"
 
 
-def test_requested_sources_defaults_to_hyy_l1_l2_l3_and_hzz_l1_l2():
+def test_build_green_secrets_json_can_emit_legacy_plain_encoding(tmp_path):
+    script = load_export_script()
+    task_a = write_task_package(tmp_path, "task_a")
+    rubric_a = write_private_rubric(tmp_path / "rubric_a.yaml")
+
+    secret_json, _summaries = script.build_green_secrets_json(
+        sources=[script.TaskSecretSource(task_dir=task_a, private_rubric_path=rubric_a)],
+        judge_env=[],
+        encoding="plain",
+    )
+
+    entry = json.loads(secret_json)["tasks"]["task_a"]
+    assert "private_rubric_yaml_b64" in entry
+    assert "private_rubric_yaml_gz_b64" not in entry
+
+
+def test_requested_sources_defaults_to_hyy_l1_l2_l3_and_hzz_l1_l2_l3():
     script = load_export_script()
 
-    sources = script.requested_sources(Namespace(task_dir=None, private_rubric=None))
+    sources = script.requested_sources(Namespace(task_dir=None, private_rubric=None, suite="all"))
 
     assert [source.task_dir.name for source in sources] == [
         "t002_hyy_v5_l1",
@@ -125,13 +144,40 @@ def test_requested_sources_defaults_to_hyy_l1_l2_l3_and_hzz_l1_l2():
         "t004_hyy_v5_l3",
         "t005_hzz4l_l1",
         "t006_hzz4l_l2",
+        "t007_hzz4l_l3",
+    ]
+
+
+def test_requested_sources_can_export_hyy_suite_only():
+    script = load_export_script()
+
+    sources = script.requested_sources(Namespace(task_dir=None, private_rubric=None, suite="hyy"))
+
+    assert [source.task_dir.name for source in sources] == [
+        "t002_hyy_v5_l1",
+        "t003_hyy_v5_l2",
+        "t004_hyy_v5_l3",
+    ]
+
+
+def test_requested_sources_can_export_hzz_suite_only():
+    script = load_export_script()
+
+    sources = script.requested_sources(Namespace(task_dir=None, private_rubric=None, suite="hzz"))
+
+    assert [source.task_dir.name for source in sources] == [
+        "t005_hzz4l_l1",
+        "t006_hzz4l_l2",
+        "t007_hzz4l_l3",
     ]
 
 
 def test_requested_sources_infers_l2_private_rubric_for_l2_single_task():
     script = load_export_script()
 
-    sources = script.requested_sources(Namespace(task_dir=script.DEFAULT_L2_TASK_DIR, private_rubric=None))
+    sources = script.requested_sources(
+        Namespace(task_dir=script.DEFAULT_L2_TASK_DIR, private_rubric=None, suite="all")
+    )
 
     assert len(sources) == 1
     assert sources[0].task_dir.name == "t003_hyy_v5_l2"
@@ -141,7 +187,9 @@ def test_requested_sources_infers_l2_private_rubric_for_l2_single_task():
 def test_requested_sources_infers_l3_private_rubric_for_l3_single_task():
     script = load_export_script()
 
-    sources = script.requested_sources(Namespace(task_dir=script.DEFAULT_L3_TASK_DIR, private_rubric=None))
+    sources = script.requested_sources(
+        Namespace(task_dir=script.DEFAULT_L3_TASK_DIR, private_rubric=None, suite="all")
+    )
 
     assert len(sources) == 1
     assert sources[0].task_dir.name == "t004_hyy_v5_l3"
@@ -151,7 +199,9 @@ def test_requested_sources_infers_l3_private_rubric_for_l3_single_task():
 def test_requested_sources_infers_hzz_l1_private_rubric_for_hzz_single_task():
     script = load_export_script()
 
-    sources = script.requested_sources(Namespace(task_dir=script.DEFAULT_HZZ_L1_TASK_DIR, private_rubric=None))
+    sources = script.requested_sources(
+        Namespace(task_dir=script.DEFAULT_HZZ_L1_TASK_DIR, private_rubric=None, suite="all")
+    )
 
     assert len(sources) == 1
     assert sources[0].task_dir.name == "t005_hzz4l_l1"
@@ -161,11 +211,25 @@ def test_requested_sources_infers_hzz_l1_private_rubric_for_hzz_single_task():
 def test_requested_sources_infers_hzz_l2_private_rubric_for_hzz_single_task():
     script = load_export_script()
 
-    sources = script.requested_sources(Namespace(task_dir=script.DEFAULT_HZZ_L2_TASK_DIR, private_rubric=None))
+    sources = script.requested_sources(
+        Namespace(task_dir=script.DEFAULT_HZZ_L2_TASK_DIR, private_rubric=None, suite="all")
+    )
 
     assert len(sources) == 1
     assert sources[0].task_dir.name == "t006_hzz4l_l2"
     assert sources[0].private_rubric_path.name == "hzz4l_l2_private_rubric.yaml"
+
+
+def test_requested_sources_infers_hzz_l3_private_rubric_for_hzz_single_task():
+    script = load_export_script()
+
+    sources = script.requested_sources(
+        Namespace(task_dir=script.DEFAULT_HZZ_L3_TASK_DIR, private_rubric=None, suite="all")
+    )
+
+    assert len(sources) == 1
+    assert sources[0].task_dir.name == "t007_hzz4l_l3"
+    assert sources[0].private_rubric_path.name == "hzz4l_l3_private_rubric.yaml"
 
 
 def test_resolve_private_rubric_keeps_existing_cache_when_fallback_changes(tmp_path):

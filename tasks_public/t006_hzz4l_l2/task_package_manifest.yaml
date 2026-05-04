@@ -16,13 +16,13 @@ generation:
   input_python: /Users/ranriver/Projects/AgentBeats/Refs/HzzAnalysis.py
   source_package: /Users/ranriver/Projects/AgentBeats/hepex-analysisops-dev/benchmark/outputs/HZZ_packages_v3_20260502T231500/l2_package
 contract_hashes:
-  submission_contract_canonical_sha256: 4e98ea6c73468c7c2826614e9c095e04c92729ad6511c7c4e54fe7c735115e12
+  submission_contract_canonical_sha256: c9fa1c820e885984a78c42e6e9a759b7decaaceeb3faadb092f332ef0f9ac681
 files:
   public:
     - path: task_spec.yaml
       sha256: 6bf1b242a39015f97e980905a4b67eb8064691415c9a655c586ca40643306052
     - path: solver_prompt.md
-      sha256: 70ce79276942d708422569368ce54429726b57095725b091e28946300beb66b2
+      sha256: fb7105ec1f960d6a9c3645474ebce14e4dbde9edd2b6d99f8482583d9310ea33
     - path: submission_contract.yaml
-      sha256: 63523e1703ed7d72e4bf6f5cb858fd84858398724e7c1eb43a359b3d2e0584e4
+      sha256: 9b3f82f82e5c266613f6fbb3585dc9b94db5f97e547615705cd1b189559fe77a
   private: []
